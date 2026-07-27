@@ -53,6 +53,55 @@ CUSTOM_ADDONS = "/opt/odoo19dev/custom-addons/priority_blinds"
 API_KEY = None  # Set at startup from env or config file
 
 
+def reload_api_key():
+    """Reload API_KEY from the DB (called after config changes)."""
+    global API_KEY
+    # Try DB first (import here to avoid circular imports)
+    try:
+        from app.database import SessionLocal
+        from app.models import load_api_key as db_load_api_key
+        db = SessionLocal()
+        try:
+            key = db_load_api_key(db)
+            if key:
+                API_KEY = key
+                return
+        finally:
+            db.close()
+    except Exception:
+        pass
+    # Fall back to env/file
+    import os
+    key = os.environ.get("ODOO_API_KEY", "")
+    if key:
+        API_KEY = key
+        return
+    try:
+        with open("/opt/pb-promote/odoo_api_key.txt") as f:
+            API_KEY = f.read().strip()
+    except FileNotFoundError:
+        pass
+
+
+def get_env_config(env: str) -> dict:
+    """Get environment config, preferring DB over hardcoded defaults."""
+    try:
+        from app.database import SessionLocal
+        from app.models import load_env_config
+        db = SessionLocal()
+        try:
+            db_config = load_env_config(db, env)
+            # Merge with hardcoded as fallback for any missing keys
+            merged = dict(ENVIRONMENTS.get(env, {}))
+            merged.update({k: v for k, v in db_config.items() if v})
+            return merged
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return ENVIRONMENTS.get(env, {})
+
+
 @dataclass
 class OdooHealth:
     env: str
@@ -64,31 +113,6 @@ class OdooHealth:
     error: Optional[str] = None
     http_status: int = 0
     response_time_ms: float = 0.0
-
-
-def _load_api_key() -> str:
-    """Load the Odoo API key from environment or config file."""
-    global API_KEY
-    if API_KEY:
-        return API_KEY
-
-    import os
-
-    key = os.environ.get("ODOO_API_KEY", "")
-    if key:
-        API_KEY = key
-        return key
-
-    # Try config file
-    config_path = "/opt/pb-promote/odoo_api_key.txt"
-    try:
-        with open(config_path) as f:
-            API_KEY = f.read().strip()
-            return API_KEY
-    except FileNotFoundError:
-        pass
-
-    return ""
 
 
 def check_http(url: str, timeout: int = 10) -> tuple[int, float]:
@@ -112,7 +136,10 @@ def check_http(url: str, timeout: int = 10) -> tuple[int, float]:
 
 def check_xmlrpc(url: str, db: str, username: str) -> tuple[bool, str]:
     """Try XML-RPC auth. Returns (ok, error_message)."""
-    api_key = _load_api_key()
+    api_key = API_KEY
+    if not api_key:
+        reload_api_key()
+        api_key = API_KEY
     if not api_key:
         return False, "No API key configured"
 
@@ -130,13 +157,13 @@ def check_xmlrpc(url: str, db: str, username: str) -> tuple[bool, str]:
 
 def check_db(env: str) -> tuple[bool, str]:
     """Check PostgreSQL connectivity for an environment."""
-    conf = ENVIRONMENTS[env]
-    db = conf["db"]
+    conf = get_env_config(env)
+    db_name = conf["db"]
     try:
         result = subprocess.run(
             [
                 "sudo", "-u", "postgres", "psql",
-                "-d", db, "-c", "SELECT 1;",
+                "-d", db_name, "-c", "SELECT 1;",
             ],
             capture_output=True, text=True, timeout=10,
         )
@@ -153,7 +180,8 @@ def check_db(env: str) -> tuple[bool, str]:
 
 def check_service(env: str) -> tuple[bool, str]:
     """Check if the systemd service is active."""
-    service = ENVIRONMENTS[env]["service"]
+    conf = get_env_config(env)
+    service = conf.get("service", "odoo")
     try:
         result = subprocess.run(
             ["systemctl", "is-active", service],
@@ -167,7 +195,10 @@ def check_service(env: str) -> tuple[bool, str]:
 
 def check_modules(url: str, db: str, username: str) -> tuple[int, str]:
     """Count installed modules via XML-RPC. Returns (count, error)."""
-    api_key = _load_api_key()
+    api_key = API_KEY
+    if not api_key:
+        reload_api_key()
+        api_key = API_KEY
     if not api_key:
         return 0, "No API key"
 
@@ -191,7 +222,7 @@ def check_modules(url: str, db: str, username: str) -> tuple[int, str]:
 
 def full_health_check(env: str) -> OdooHealth:
     """Run all health checks for an environment."""
-    conf = ENVIRONMENTS[env]
+    conf = get_env_config(env)
     h = OdooHealth(env=env)
 
     # HTTP check
@@ -228,8 +259,8 @@ def get_file_diff() -> dict:
     import os
 
     diffs = []
-    dev_base = ENVIRONMENTS["dev"]["code_root"]
-    stage_base = ENVIRONMENTS["stage"]["code_root"]
+    dev_base = get_env_config("dev").get("code_root", "/usr/lib/python3/dist-packages")
+    stage_base = get_env_config("stage").get("code_root", "/opt/odoo19stage")
 
     for path in TRACKED_PATHS:
         dev_path = os.path.join(dev_base, path)

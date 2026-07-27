@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Config — {{ app_title }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <h2>Configuration</h2>
+    <p>API keys and environment connection parameters</p>
+</div>
+
+{% if saved %}
+<div class="alert alert-ok">✓ Configuration saved successfully.</div>
+{% endif %}
+
+<!-- Global API Key -->
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-header">Odoo API Key (XML-RPC)</div>
+    <p style="color: var(--muted); font-size: 0.8rem; margin-bottom: 0.75rem;">
+        Used to authenticate XML-RPC calls to all three Odoo environments.
+        Generate this in Odoo: Settings → Users → Admin → API Keys.
+    </p>
+    <form method="post" action="/config/save-api-key" style="display: flex; gap: 0.75rem; align-items: flex-end;">
+        <div style="flex: 1;">
+            <input type="password" name="api_key" id="api-key"
+                   value="{{ api_key_masked }}" autocomplete="off"
+                   placeholder="Enter Odoo API key..."
+                   style="font-family: monospace;">
+        </div>
+        <button type="submit" class="btn btn-primary">Save API Key</button>
+    </form>
+    {% if api_key_ok %}
+    <div style="margin-top: 0.6rem; color: var(--green); font-size: 0.85rem;">✓ API key configured</div>
+    {% else %}
+    <div style="margin-top: 0.6rem; color: var(--orange); font-size: 0.85rem;">⚠ No API key set — XML-RPC calls will fail</div>
+    {% endif %}
+</div>
+
+<!-- Per-Environment Config -->
+<div class="grid-2" style="margin-bottom: 2rem;">
+    {% for env in environments %}
+    <div class="card env-card {{ env.env_type }}" style="margin-bottom: 0;">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>{{ env.name }}</span>
+            <span class="badge badge-info" style="font-size: 0.7rem;">{{ env.env_type }}</span>
+        </div>
+        <form method="post" action="/config/save-env" class="env-form" data-env="{{ env.env_type }}">
+            <input type="hidden" name="env_type" value="{{ env.env_type }}">
+
+            <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+                URL
+            </label>
+            <input type="text" name="url" value="{{ env.url }}">
+
+            <div style="display: flex; gap: 0.5rem;">
+                <div style="flex: 1;">
+                    <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+                        Database
+                    </label>
+                    <input type="text" name="db" value="{{ env.db }}">
+                </div>
+                <div style="width: 80px;">
+                    <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+                        Port
+                    </label>
+                    <input type="text" name="port" value="{{ env.port }}">
+                </div>
+            </div>
+
+            <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+                Username
+            </label>
+            <input type="text" name="username" value="{{ env.username }}">
+
+            <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+                systemd Service
+            </label>
+            <input type="text" name="service" value="{{ env.service }}">
+
+            <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+                Code Root
+            </label>
+            <input type="text" name="code_root" value="{{ env.code_root }}">
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <button type="button" class="btn btn-sm test-btn" data-env="{{ env.env_type }}">
+                    Test Connection
+                </button>
+                <span class="test-result" id="test-{{ env.env_type }}" style="font-size: 0.8rem; align-self: center;"></span>
+            </div>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Additional Settings -->
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-header">Additional Settings</div>
+    <form method="post" action="/config/save-extra">
+        <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+            Custom Addons Path (dev)
+        </label>
+        <input type="text" name="custom_addons_path" value="{{ extra.custom_addons_path }}">
+
+        <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+            Tracked Paths (JSON array — paths to diff for promotion)
+        </label>
+        <input type="text" name="tracked_paths" value="{{ extra.tracked_paths }}"
+               style="font-family: monospace; font-size: 0.8rem;">
+
+        <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+            SSH User
+        </label>
+        <input type="text" name="ssh_user" value="{{ extra.ssh_user }}">
+
+        <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+            SSH Host
+        </label>
+        <input type="text" name="ssh_host" value="{{ extra.ssh_host }}">
+
+        <button type="submit" class="btn btn-primary btn-sm" style="margin-top: 1rem;">Save Settings</button>
+    </form>
+</div>
+
+<script>
+// Test connection buttons
+document.querySelectorAll('.test-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const env = btn.dataset.env;
+        const resultEl = document.getElementById('test-' + env);
+        resultEl.innerHTML = '<span class="spinner"></span> Testing...';
+        btn.disabled = true;
+
+        try {
+            const resp = await fetch('/api/config/test/' + env);
+            const html = await resp.text();
+            resultEl.innerHTML = html;
+        } catch (e) {
+            resultEl.innerHTML = '<span style="color: var(--red);">✗ Request failed</span>';
+        }
+        btn.disabled = false;
+    });
+});
+</script>
+
+{% endblock %}

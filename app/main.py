@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from .database import init_db, get_db, engine
-from .models import Base, Promotion, Rollback, Check, Backup
+from .models import Base, Promotion, Rollback, Check, Backup, Setting, get_setting, set_setting, load_env_config, load_api_key
 from . import odoo_client as oc
 from . import checks as check_engine
 from . import promote as promote_engine
@@ -62,6 +62,7 @@ def create_app() -> FastAPI:
         for env in ("dev", "stage", "prod"):
             h = oc.full_health_check(env)
             service_ok, service_status = oc.check_service(env)
+            cfg = oc.get_env_config(env)
             env_status[env] = {
                 "reachable": h.reachable,
                 "auth_ok": h.auth_ok,
@@ -72,7 +73,7 @@ def create_app() -> FastAPI:
                 "service_active": service_ok,
                 "service_status": service_status,
                 "error": h.error,
-                "config": oc.ENVIRONMENTS[env],
+                "config": cfg,
             }
         ctx["env_status"] = env_status
 
@@ -248,6 +249,141 @@ def create_app() -> FastAPI:
         ctx = base_context(request)
         ctx["active_page"] = "guide"
         return render_template("guide.html", ctx)
+
+    @app.get("/config", response_class=HTMLResponse)
+    async def config_page(request: Request, db: Session = Depends(get_db)):
+        ctx = base_context(request)
+        ctx["active_page"] = "config"
+        ctx["saved"] = request.query_params.get("saved") == "1"
+
+        # API key status
+        api_key = load_api_key(db)
+        ctx["api_key_ok"] = bool(api_key)
+        ctx["api_key_masked"] = "••••••••" if api_key else ""
+
+        # Per-environment config (from DB with fallback)
+        ctx["environments"] = []
+        for env_type in ("dev", "stage", "prod"):
+            cfg = load_env_config(db, env_type)
+            cfg["env_type"] = env_type
+            cfg["name"] = env_type.upper()
+            ctx["environments"].append(cfg)
+
+        # Extra settings
+        ctx["extra"] = {
+            "custom_addons_path": get_setting(db, "custom_addons_path",
+                                               default="/opt/odoo19dev/custom-addons/priority_blinds"),
+            "tracked_paths": get_setting(db, "tracked_paths",
+                                          default='["odoo/http.py", "odoo/addons/website_sale/", "odoo/addons/website/", "odoo/addons/web/"]'),
+            "ssh_user": get_setting(db, "ssh_user", default="odoo19dev"),
+            "ssh_host": get_setting(db, "ssh_host", default="localhost"),
+        }
+
+        return render_template("config.html", ctx)
+
+    @app.post("/config/save-api-key")
+    async def config_save_api_key(
+        request: Request,
+        api_key: str = Form(""),
+        db: Session = Depends(get_db),
+    ):
+        if api_key and api_key != "••••••••":
+            set_setting(db, "api_key", api_key, "Odoo XML-RPC API key")
+            # Also keep file in sync for fallback
+            try:
+                with open("/opt/pb-promote/odoo_api_key.txt", "w") as f:
+                    f.write(api_key)
+            except Exception:
+                pass
+            db.commit()
+            # Refresh the in-memory cache in odoo_client
+            oc.API_KEY = api_key
+        return RedirectResponse("/config?saved=1", status_code=303)
+
+    @app.post("/config/save-env")
+    async def config_save_env(
+        request: Request,
+        env_type: str = Form(...),
+        url: str = Form(""),
+        port: str = Form(""),
+        db_name: str = Form(None, alias="db"),
+        username: str = Form(""),
+        service: str = Form(""),
+        code_root: str = Form(""),
+        db: Session = Depends(get_db),
+    ):
+        if env_type not in ("dev", "stage", "prod"):
+            raise HTTPException(400, "Invalid environment")
+
+        fields = {
+            "url": url,
+            "port": port or "8069",
+            "db": db_name or "",
+            "username": username or "admin",
+            "service": service,
+            "code_root": code_root,
+        }
+        for field, value in fields.items():
+            set_setting(db, f"env.{env_type}.{field}", value)
+
+        db.commit()
+        return RedirectResponse("/config?saved=1", status_code=303)
+
+    @app.post("/config/save-extra")
+    async def config_save_extra(
+        request: Request,
+        custom_addons_path: str = Form(""),
+        tracked_paths: str = Form(""),
+        ssh_user: str = Form(""),
+        ssh_host: str = Form(""),
+        db: Session = Depends(get_db),
+    ):
+        set_setting(db, "custom_addons_path", custom_addons_path)
+        set_setting(db, "tracked_paths", tracked_paths)
+        set_setting(db, "ssh_user", ssh_user)
+        set_setting(db, "ssh_host", ssh_host)
+        db.commit()
+        return RedirectResponse("/config?saved=1", status_code=303)
+
+    @app.get("/api/config/test/{env}")
+    async def api_config_test(env: str, db: Session = Depends(get_db)):
+        """Test XML-RPC connection using saved config for an environment."""
+        if env not in ("dev", "stage", "prod"):
+            raise HTTPException(400, "Invalid environment")
+
+        import xmlrpc.client
+        cfg = load_env_config(db, env)
+        api_key = load_api_key(db)
+
+        if not api_key:
+            return HTMLResponse(
+                "<span style='color: var(--orange); font-size: 0.85rem;'>"
+                "⚠ No API key — save one above first</span>"
+            )
+
+        try:
+            common_url = f"{cfg['url']}/xmlrpc/2/common"
+            common = xmlrpc.client.ServerProxy(common_url, allow_none=True)
+            version = common.version()
+            uid = common.authenticate(cfg["db"], cfg["username"], api_key, {})
+
+            if uid and uid > 0:
+                return HTMLResponse(
+                    f"<span style='color: var(--green); font-size: 0.85rem;'>"
+                    f"✓ Connected! Odoo {version.get('server_version', '?')} | "
+                    f"DB: {cfg['db']} | UID: {uid}</span>"
+                )
+            else:
+                return HTMLResponse(
+                    "<span style='color: var(--red); font-size: 0.85rem;'>"
+                    "✗ Auth failed — check API key and credentials</span>"
+                )
+        except Exception as e:
+            msg = str(e)[:200]
+            return HTMLResponse(
+                f"<span style='color: var(--red); font-size: 0.85rem;'>"
+                f"✗ {msg}</span>"
+            )
 
     # --- API: Status ---
 

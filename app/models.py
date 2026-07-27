@@ -78,3 +78,91 @@ class Backup(Base):
     promotion_id = Column(Integer, ForeignKey("promotions.id"))
     created_at = Column(String(30), nullable=False, default=_now)
     size_bytes = Column(Integer)
+
+
+class Setting(Base):
+    """Key-value configuration store for environment params, API keys, etc."""
+    __tablename__ = "settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, default="")
+    description = Column(Text, default="")
+    updated_at = Column(String(30), default=_now)
+
+    # Known keys:
+    #   api_key                  — Odoo XML-RPC API key (global)
+    #   env.<env>.url            — Base URL (https://dev.priorityblinds.com.au)
+    #   env.<env>.port           — Port number (8069)
+    #   env.<env>.db             — Database name (odoo19dev)
+    #   env.<env>.username       — XML-RPC username (admin)
+    #   env.<env>.service        — systemd service name (odoo, odoo-stage)
+    #   env.<env>.code_root      — Code root path on disk
+    #   env.<env>.theme_colour   — UI card accent (#27ae60)
+    #   tracked_paths            — JSON list of paths to diff for promotion
+    #   custom_addons_path       — Path to custom addons on dev
+    #   ssh_host                 — SSH host for remote commands
+    #   ssh_user                 — SSH user
+    #   promote.backup_root      — Backup directory root
+    #   promote.smoke_urls       — JSON list of URLs to hit after promote
+
+
+# ── Setting helpers ────────────────────────────────────────────────────
+
+import json as _json
+
+
+def get_setting(db, key: str, default: str = "") -> str:
+    """Read a single setting value from the DB."""
+    row = db.query(Setting).filter(Setting.key == key).first()
+    return row.value if row else default
+
+
+def set_setting(db, key: str, value: str, description: str = ""):
+    """Write a setting, creating or updating the row."""
+    row = db.query(Setting).filter(Setting.key == key).first()
+    if row:
+        row.value = value
+        if description:
+            row.description = description
+        row.updated_at = _now()
+    else:
+        db.add(Setting(key=key, value=value, description=description))
+
+
+def load_env_config(db, env: str) -> dict:
+    """Load all settings for an environment from the DB, falling back to hardcoded."""
+    from app.odoo_client import ENVIRONMENTS as HARDCODED
+    defaults = HARDCODED.get(env, {})
+
+    config = {}
+    for field in ("url", "db", "username", "code_root", "service"):
+        config[field] = get_setting(db, f"env.{env}.{field}", default=str(defaults.get(field, "")))
+    port_raw = get_setting(db, f"env.{env}.port", default=str(defaults.get("port", 8069)))
+    config["port"] = int(port_raw) if port_raw.isdigit() else 8069
+    config["theme_colour"] = get_setting(
+        db, f"env.{env}.theme_colour",
+        default={"dev": "#27ae60", "stage": "#e67e22", "prod": "#17a2b8"}.get(env, "#30363d"),
+    )
+    return config
+
+
+def load_api_key(db) -> str:
+    """Load the Odoo API key, checking DB first, then env, then file."""
+    key = get_setting(db, "api_key")
+    if key:
+        return key
+    import os
+    key = os.environ.get("ODOO_API_KEY", "")
+    if key:
+        return key
+    try:
+        with open("/opt/pb-promote/odoo_api_key.txt") as f:
+            key = f.read().strip()
+    except FileNotFoundError:
+        pass
+    if key:
+        # Migrate into DB
+        set_setting(db, "api_key", key, "Migrated from odoo_api_key.txt")
+        db.commit()
+    return key
