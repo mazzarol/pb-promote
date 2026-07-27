@@ -256,17 +256,16 @@ def create_app() -> FastAPI:
         ctx["active_page"] = "config"
         ctx["saved"] = request.query_params.get("saved") == "1"
 
-        # API key status
-        api_key = load_api_key(db)
-        ctx["api_key_ok"] = bool(api_key)
-        ctx["api_key_masked"] = "••••••••" if api_key else ""
-
         # Per-environment config (from DB with fallback)
         ctx["environments"] = []
         for env_type in ("dev", "stage", "prod"):
             cfg = load_env_config(db, env_type)
             cfg["env_type"] = env_type
             cfg["name"] = env_type.upper()
+            # Per-env API key status
+            api_key = load_api_key(db, env_type)
+            cfg["api_key_ok"] = bool(api_key)
+            cfg["api_key_masked"] = "••••••••" if api_key else ""
             ctx["environments"].append(cfg)
 
         # Extra settings
@@ -281,25 +280,6 @@ def create_app() -> FastAPI:
 
         return render_template("config.html", ctx)
 
-    @app.post("/config/save-api-key")
-    async def config_save_api_key(
-        request: Request,
-        api_key: str = Form(""),
-        db: Session = Depends(get_db),
-    ):
-        if api_key and api_key != "••••••••":
-            set_setting(db, "api_key", api_key, "Odoo XML-RPC API key")
-            # Also keep file in sync for fallback
-            try:
-                with open("/opt/pb-promote/odoo_api_key.txt", "w") as f:
-                    f.write(api_key)
-            except Exception:
-                pass
-            db.commit()
-            # Refresh the in-memory cache in odoo_client
-            oc.API_KEY = api_key
-        return RedirectResponse("/config?saved=1", status_code=303)
-
     @app.post("/config/save-env")
     async def config_save_env(
         request: Request,
@@ -310,6 +290,7 @@ def create_app() -> FastAPI:
         username: str = Form(""),
         service: str = Form(""),
         code_root: str = Form(""),
+        api_key: str = Form(""),
         db: Session = Depends(get_db),
     ):
         if env_type not in ("dev", "stage", "prod"):
@@ -325,6 +306,10 @@ def create_app() -> FastAPI:
         }
         for field, value in fields.items():
             set_setting(db, f"env.{env_type}.{field}", value)
+
+        # Per-environment API key
+        if api_key and api_key != "••••••••":
+            set_setting(db, f"env.{env_type}.api_key", api_key, f"Odoo API key for {env_type}")
 
         db.commit()
         return RedirectResponse("/config?saved=1", status_code=303)
@@ -353,12 +338,12 @@ def create_app() -> FastAPI:
 
         import xmlrpc.client
         cfg = load_env_config(db, env)
-        api_key = load_api_key(db)
+        api_key = load_api_key(db, env)
 
         if not api_key:
             return HTMLResponse(
                 "<span style='color: var(--orange); font-size: 0.85rem;'>"
-                "⚠ No API key — save one above first</span>"
+                f"⚠ No API key — save one for {env.upper()} above</span>"
             )
 
         try:

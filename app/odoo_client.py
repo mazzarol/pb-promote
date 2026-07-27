@@ -17,7 +17,7 @@ ENVIRONMENTS = {
     "dev": {
         "url": "https://dev.priorityblinds.com.au",
         "db": "odoo19dev",
-        "username": "admin",
+        "username": "pb-promote",
         "port": 8069,
         "code_root": "/usr/lib/python3/dist-packages",
         "service": "odoo",
@@ -25,7 +25,7 @@ ENVIRONMENTS = {
     "stage": {
         "url": "https://stage.priorityblinds.com.au",
         "db": "odoo19stage",
-        "username": "admin",
+        "username": "pb-promote",
         "port": 8070,
         "code_root": "/opt/odoo19stage",
         "service": "odoo-stage",
@@ -33,7 +33,7 @@ ENVIRONMENTS = {
     "prod": {
         "url": "https://priorityblinds.com.au",
         "db": "odoo19prod",
-        "username": "admin",
+        "username": "pb-promote",
         "port": 8069,
         "code_root": "/usr/lib/python3/dist-packages",
         "service": "odoo",
@@ -50,37 +50,40 @@ TRACKED_PATHS = [
 
 CUSTOM_ADDONS = "/opt/odoo19dev/custom-addons/priority_blinds"
 
-API_KEY = None  # Set at startup from env or config file
+API_KEY = None  # Legacy — use get_env_api_key() instead
 
 
-def reload_api_key():
-    """Reload API_KEY from the DB (called after config changes)."""
-    global API_KEY
-    # Try DB first (import here to avoid circular imports)
+def get_env_api_key(env: str) -> str:
+    """Get the API key for a specific environment. Falls through: DB per-env → DB global → env var → file."""
     try:
         from app.database import SessionLocal
         from app.models import load_api_key as db_load_api_key
         db = SessionLocal()
         try:
-            key = db_load_api_key(db)
+            key = db_load_api_key(db, env)
             if key:
-                API_KEY = key
-                return
+                return key
         finally:
             db.close()
     except Exception:
         pass
-    # Fall back to env/file
+    # Fall back to legacy global API_KEY (env var or file)
     import os
+    global API_KEY
+    if API_KEY:
+        return API_KEY
     key = os.environ.get("ODOO_API_KEY", "")
     if key:
         API_KEY = key
-        return
+        return key
     try:
         with open("/opt/pb-promote/odoo_api_key.txt") as f:
-            API_KEY = f.read().strip()
+            key = f.read().strip()
+            API_KEY = key
+            return key
     except FileNotFoundError:
         pass
+    return ""
 
 
 def get_env_config(env: str) -> dict:

@@ -4,35 +4,12 @@
 
 <div class="page-header">
     <h2>Configuration</h2>
-    <p>API keys and environment connection parameters</p>
+    <p>Connection parameters and API keys per environment</p>
 </div>
 
 {% if saved %}
 <div class="alert alert-ok">✓ Configuration saved successfully.</div>
 {% endif %}
-
-<!-- Global API Key -->
-<div class="card" style="margin-bottom: 2rem;">
-    <div class="card-header">Odoo API Key (XML-RPC)</div>
-    <p style="color: var(--muted); font-size: 0.8rem; margin-bottom: 0.75rem;">
-        Used to authenticate XML-RPC calls to all three Odoo environments.
-        Generate this in Odoo: Settings → Users → Admin → API Keys.
-    </p>
-    <form method="post" action="/config/save-api-key" style="display: flex; gap: 0.75rem; align-items: flex-end;">
-        <div style="flex: 1;">
-            <input type="password" name="api_key" id="api-key"
-                   value="{{ api_key_masked }}" autocomplete="off"
-                   placeholder="Enter Odoo API key..."
-                   style="font-family: monospace;">
-        </div>
-        <button type="submit" class="btn btn-primary">Save API Key</button>
-    </form>
-    {% if api_key_ok %}
-    <div style="margin-top: 0.6rem; color: var(--green); font-size: 0.85rem;">✓ API key configured</div>
-    {% else %}
-    <div style="margin-top: 0.6rem; color: var(--orange); font-size: 0.85rem;">⚠ No API key set — XML-RPC calls will fail</div>
-    {% endif %}
-</div>
 
 <!-- Per-Environment Config -->
 <div class="grid-2" style="margin-bottom: 2rem;">
@@ -44,6 +21,23 @@
         </div>
         <form method="post" action="/config/save-env" class="env-form" data-env="{{ env.env_type }}">
             <input type="hidden" name="env_type" value="{{ env.env_type }}">
+
+            <!-- API Key or Password -->
+            <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
+                Password or API Key
+                {% if env.api_key_ok %}
+                <span style="color: var(--green);">✓ set</span>
+                {% else %}
+                <span style="color: var(--orange);">⚠ not set</span>
+                {% endif %}
+            </label>
+            <input type="password" name="api_key" autocomplete="off"
+                   value="{{ env.api_key_masked }}"
+                   placeholder="User password or API key (Profile → Account Security)"
+                   style="font-family: monospace;">
+            <div style="font-size: 0.7rem; color: var(--muted); margin-top: 0.2rem;">
+                Username: <code>{{ env.username }}</code> — accepts either password or API key
+            </div>
 
             <label style="display: block; font-size: 0.75rem; color: var(--muted); margin: 0.6rem 0 0.25rem;">
                 URL

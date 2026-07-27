@@ -144,11 +144,19 @@ def load_env_config(db, env: str) -> dict:
         db, f"env.{env}.theme_colour",
         default={"dev": "#27ae60", "stage": "#e67e22", "prod": "#17a2b8"}.get(env, "#30363d"),
     )
+    # Per-environment API key
+    config["api_key"] = get_setting(db, f"env.{env}.api_key", default="")
     return config
 
 
-def load_api_key(db) -> str:
-    """Load the Odoo API key, checking DB first, then env, then file."""
+def load_api_key(db, env: str = "") -> str:
+    """Load the Odoo API key for a specific environment. Falls through DB → env var → file."""
+    # Try per-env DB key first
+    if env:
+        key = get_setting(db, f"env.{env}.api_key")
+        if key:
+            return key
+    # Try global key (legacy, or set via env var)
     key = get_setting(db, "api_key")
     if key:
         return key
@@ -162,7 +170,7 @@ def load_api_key(db) -> str:
     except FileNotFoundError:
         pass
     if key:
-        # Migrate into DB
+        # Migrate into DB as legacy
         set_setting(db, "api_key", key, "Migrated from odoo_api_key.txt")
         db.commit()
     return key
