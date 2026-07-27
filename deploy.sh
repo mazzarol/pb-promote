@@ -35,7 +35,7 @@ apt-get install -y -qq python3-venv python3-pip git postgresql-client
 echo "[2/6] Cloning/updating repository..."
 if [ -d "$APP_ROOT/.git" ]; then
     cd "$APP_ROOT"
-    git pull origin main
+        git pull origin master
 else
     if [ -d "$APP_ROOT" ]; then
         echo "  WARNING: $APP_ROOT exists but is not a git repo — backing up"

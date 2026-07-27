@@ -33,8 +33,10 @@ def create_app() -> FastAPI:
     )
 
     # Templates
-    templates_dir = Path(__file__).parent / "templates"
+    templates_dir = Path("/opt/pb-promote/app/templates")
     templates = Jinja2Templates(directory=str(templates_dir))
+    # Disable Jinja2 cache to avoid dict-hash issues with request objects
+    templates.env.cache = None
 
     # Context helpers
     def base_context(request: Request) -> dict:
