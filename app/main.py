@@ -5,14 +5,10 @@ FastAPI application with Jinja2 templates.
 
 import json
 import os
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from .database import init_db, get_db, engine
@@ -32,11 +28,18 @@ def create_app() -> FastAPI:
         version="1.0.0",
     )
 
-    # Templates
-    templates_dir = Path("/opt/pb-promote/app/templates")
-    templates = Jinja2Templates(directory=str(templates_dir))
-    # Disable Jinja2 cache to avoid dict-hash issues with request objects
-    templates.env.cache = None
+    # Templates — use Jinja2 directly (Starlette Jinja2Templates broken with Jinja2 3.1.4+)
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+    templates_dir = "/opt/pb-promote/app/templates"
+    jinja_env = Environment(
+        loader=FileSystemLoader(templates_dir),
+        autoescape=select_autoescape(["html"]),
+    )
+
+    def render_template(name: str, context: dict) -> HTMLResponse:
+        """Render a Jinja2 template directly, bypassing Starlette wrapper."""
+        template = jinja_env.get_template(name)
+        return HTMLResponse(template.render(**context))
 
     # Context helpers
     def base_context(request: Request) -> dict:
@@ -117,7 +120,7 @@ def create_app() -> FastAPI:
         else:
             ctx["git_status"] = {"is_repo": False}
 
-        return templates.TemplateResponse("dashboard.html", ctx)
+        return render_template("dashboard.html", ctx)
 
     @app.get("/promote", response_class=HTMLResponse)
     async def promote_page(request: Request, db: Session = Depends(get_db)):
@@ -139,7 +142,7 @@ def create_app() -> FastAPI:
         else:
             ctx["git_status"] = {"is_repo": False}
 
-        return templates.TemplateResponse("promote.html", ctx)
+        return render_template("promote.html", ctx)
 
     @app.get("/rollback", response_class=HTMLResponse)
     async def rollback_page(request: Request, db: Session = Depends(get_db)):
@@ -191,7 +194,7 @@ def create_app() -> FastAPI:
         else:
             ctx["git_tags"] = []
 
-        return templates.TemplateResponse("rollback.html", ctx)
+        return render_template("rollback.html", ctx)
 
     @app.get("/checks", response_class=HTMLResponse)
     async def checks_page(request: Request, db: Session = Depends(get_db)):
@@ -215,7 +218,7 @@ def create_app() -> FastAPI:
             ))
         db.commit()
 
-        return templates.TemplateResponse("checks.html", ctx)
+        return render_template("checks.html", ctx)
 
     @app.get("/history", response_class=HTMLResponse)
     async def history_page(request: Request, db: Session = Depends(get_db)):
@@ -238,13 +241,13 @@ def create_app() -> FastAPI:
         )
         ctx["rollbacks"] = rollbacks
 
-        return templates.TemplateResponse("history.html", ctx)
+        return render_template("history.html", ctx)
 
     @app.get("/guide", response_class=HTMLResponse)
     async def guide_page(request: Request):
         ctx = base_context(request)
         ctx["active_page"] = "guide"
-        return templates.TemplateResponse("guide.html", ctx)
+        return render_template("guide.html", ctx)
 
     # --- API: Status ---
 
