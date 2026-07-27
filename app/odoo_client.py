@@ -137,12 +137,9 @@ def check_http(url: str, timeout: int = 10) -> tuple[int, float]:
         return 0, elapsed
 
 
-def check_xmlrpc(url: str, db: str, username: str) -> tuple[bool, str]:
+def check_xmlrpc(env: str, url: str, db: str, username: str) -> tuple[bool, str]:
     """Try XML-RPC auth. Returns (ok, error_message)."""
-    api_key = API_KEY
-    if not api_key:
-        reload_api_key()
-        api_key = API_KEY
+    api_key = get_env_api_key(env)
     if not api_key:
         return False, "No API key configured"
 
@@ -196,12 +193,9 @@ def check_service(env: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def check_modules(url: str, db: str, username: str) -> tuple[int, str]:
+def check_modules(env: str, url: str, db: str, username: str) -> tuple[int, str]:
     """Count installed modules via XML-RPC. Returns (count, error)."""
-    api_key = API_KEY
-    if not api_key:
-        reload_api_key()
-        api_key = API_KEY
+    api_key = get_env_api_key(env)
     if not api_key:
         return 0, "No API key"
 
@@ -237,7 +231,7 @@ def full_health_check(env: str) -> OdooHealth:
         return h
 
     # XML-RPC auth
-    h.xmlrpc_ok, err = check_xmlrpc(conf["url"], conf["db"], conf["username"])
+    h.xmlrpc_ok, err = check_xmlrpc(env, conf["url"], conf["db"], conf["username"])
     h.auth_ok = h.xmlrpc_ok
     if not h.xmlrpc_ok:
         h.error = err
@@ -251,7 +245,7 @@ def full_health_check(env: str) -> OdooHealth:
 
     # Module count
     h.modules_loaded, _ = check_modules(
-        conf["url"], conf["db"], conf["username"]
+        env, conf["url"], conf["db"], conf["username"]
     )
 
     return h
