@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Guide — {{ app_title }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <h2>Promotion & Rollback Guide</h2>
+    <p>Step-by-step instructions for the Odoo 19 CI/CD pipeline</p>
+</div>
+
+<div class="card">
+    <div class="card-header">Environment Overview</div>
+    <table>
+        <thead><tr><th>Environment</th><th>Port</th><th>URL</th><th>DB</th><th>Code Root</th><th>Theme</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><strong>DEV</strong></td><td>8069</td>
+                <td><code>dev.priorityblinds.com.au</code></td>
+                <td>odoo19dev</td>
+                <td>/usr/lib/python3/dist-packages/</td>
+                <td><span class="badge" style="background:#27ae6022;color:#27ae60;">#27ae60</span></td>
+            </tr>
+            <tr>
+                <td><strong>STAGE</strong></td><td>8070</td>
+                <td><code>stage.priorityblinds.com.au</code></td>
+                <td>odoo19stage</td>
+                <td>/opt/odoo19stage/</td>
+                <td><span class="badge" style="background:#e67e2222;color:#e67e22;">#e67e22</span></td>
+            </tr>
+            <tr>
+                <td><strong>PROD</strong></td><td>8069</td>
+                <td><code>priorityblinds.com.au</code></td>
+                <td>odoo19prod</td>
+                <td>/usr/lib/python3/dist-packages/</td>
+                <td><span class="badge" style="background:#17a2b822;color:#17a2b8;">#17a2b8</span></td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <div class="card-header">Standard Promotion Workflow</div>
+
+    <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem; color: var(--accent);">Phase 1: Pre-Flight Checks</h3>
+    <ol style="padding-left: 1.5rem; line-height: 1.8; color: var(--muted); font-size: 0.9rem;">
+        <li>Navigate to <a href="/checks" style="color: var(--accent);">Checks</a> page</li>
+        <li>Verify all critical checks pass (green)</li>
+        <li>Address any failures before proceeding</li>
+        <li>Warnings (amber) are informational — note them but you can proceed</li>
+    </ol>
+
+    <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem; color: var(--accent);">Phase 2: Dev → Stage</h3>
+    <ol style="padding-left: 1.5rem; line-height: 1.8; color: var(--muted); font-size: 0.9rem;">
+        <li>Navigate to <a href="/promote" style="color: var(--accent);">Promote</a> page</li>
+        <li>Review the file diff to confirm expected changes</li>
+        <li>Click <strong>Promote to Stage</strong></li>
+        <li>The system will:
+            <ul style="margin-top: 0.3rem;">
+                <li>Auto-commit any uncommitted dev changes to git</li>
+                <li>Create a stage DB backup</li>
+                <li>Create a stage code snapshot</li>
+                <li>Run promote.sh to copy changed files</li>
+                <li>Clear .pyc caches</li>
+                <li>Restart odoo-stage service</li>
+                <li>Run smoke tests (HTTP, XML-RPC, /shop)</li>
+                <li>Create a git tag (stage-YYYYMMDD-HHMMSS)</li>
+            </ul>
+        </li>
+        <li>Verify the smoke test results show green</li>
+    </ol>
+
+    <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem; color: var(--orange);">Phase 3: Stage Validation</h3>
+    <ol style="padding-left: 1.5rem; line-height: 1.8; color: var(--muted); font-size: 0.9rem;">
+        <li>Visit <code>https://stage.priorityblinds.com.au</code></li>
+        <li>Browse /shop — verify products render</li>
+        <li>Check images display correctly (CSP fix verified)</li>
+        <li>Test any new features or fixes</li>
+        <li>If issues found: rollback via the Rollback page</li>
+    </ol>
+
+    <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem; color: var(--red);">Phase 4: Stage → Production</h3>
+    <ol style="padding-left: 1.5rem; line-height: 1.8; color: var(--muted); font-size: 0.9rem;">
+        <li>Ensure stage validation is complete</li>
+        <li>Navigate to <a href="/promote" style="color: var(--accent);">Promote</a> page</li>
+        <li>Type <code>PROD</code> in the confirmation field</li>
+        <li>Click <strong>Promote to Production</strong></li>
+        <li>The system will:
+            <ul style="margin-top: 0.3rem;">
+                <li>Create a prod DB backup (CRITICAL)</li>
+                <li>Copy tracked files from stage to prod</li>
+                <li>Clear .pyc caches</li>
+                <li>Restart odoo service</li>
+                <li>Run prod smoke tests</li>
+                <li>Create a git tag (prod-YYYYMMDD-HHMMSS)</li>
+            </ul>
+        </li>
+        <li>Monitor production for at least 5 minutes</li>
+    </ol>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <div class="card-header">Rollback Procedures</div>
+
+    <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem; color: var(--orange);">Stage Rollback</h3>
+    <ol style="padding-left: 1.5rem; line-height: 1.8; color: var(--muted); font-size: 0.9rem;">
+        <li>Navigate to <a href="/rollback" style="color: var(--accent);">Rollback</a> page</li>
+        <li>Find the promotion to roll back, or use "Rollback Stage (Latest Backup)"</li>
+        <li>Click <strong>Rollback Stage</strong></li>
+        <li>System stops stage, restores DB + code from backup, restarts</li>
+    </ol>
+
+    <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem; color: var(--red);">Production Rollback</h3>
+    <ol style="padding-left: 1.5rem; line-height: 1.8; color: var(--muted); font-size: 0.9rem;">
+        <li>Navigate to <a href="/rollback" style="color: var(--accent);">Rollback</a> page</li>
+        <li>Type <code>PROD</code> in the confirmation field</li>
+        <li>Click <strong>Rollback Production</strong></li>
+        <li>System stops prod, restores DB from pre-promotion backup, restarts</li>
+        <li>Monitor production for 5 minutes after rollback</li>
+    </ol>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <div class="card-header">Critical Config</div>
+    <table>
+        <thead><tr><th>Item</th><th>Location</th><th>Notes</th></tr></thead>
+        <tbody>
+            <tr>
+                <td>CSP Fix</td>
+                <td><code>/usr/lib/python3/dist-packages/odoo/http.py</code> lines 587, 2779</td>
+                <td>Must re-apply if <code>apt upgrade odoo</code> runs</td>
+            </tr>
+            <tr>
+                <td>Google Maps Key</td>
+                <td><code>ir.config_parameter</code> &rarr; <code>google_maps.api_key</code></td>
+                <td>Shared across all environments</td>
+            </tr>
+            <tr>
+                <td>Manifest</td>
+                <td><code>/opt/odoo19stage/.promotions/manifest.txt</code></td>
+                <td>List of files to promote</td>
+            </tr>
+            <tr>
+                <td>Fail2ban</td>
+                <td>BinaryLane web console</td>
+                <td>SSH lockout recovery only via console</td>
+            </tr>
+            <tr>
+                <td>SMB Backup</td>
+                <td><code>//192.168.50.1/PB-Backup</code></td>
+                <td>Credentials in memory</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

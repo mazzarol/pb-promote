@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Pre-Flight Checks — {{ app_title }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <h2>Pre-Flight Checks</h2>
+    <p>Comprehensive system health verification before any promotion</p>
+</div>
+
+<!-- Score Card -->
+<div class="card">
+    <div class="card-header">Check Results</div>
+
+    <div style="display: flex; gap: 2rem; margin-bottom: 1rem; font-size: 1rem;">
+        <div>
+            <span style="font-size: 2rem; font-weight: 700; color: {{ 'var(--green)' if not score.blocked else 'var(--red)' }};">
+                {{ score.passed }}
+            </span>
+            <span style="color: var(--muted);"> / {{ score.total }} passed</span>
+        </div>
+        {% if score.failed > 0 %}
+        <div>
+            <span style="font-size: 2rem; font-weight: 700; color: var(--red);">{{ score.failed }}</span>
+            <span style="color: var(--muted);"> failed</span>
+        </div>
+        {% endif %}
+        {% if score.warnings > 0 %}
+        <div>
+            <span style="font-size: 2rem; font-weight: 700; color: var(--orange);">{{ score.warnings }}</span>
+            <span style="color: var(--muted);"> warnings</span>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if score.blocked %}
+    <div class="alert alert-err">
+        <strong>PROMOTION BLOCKED</strong> — Fix critical failures before promoting.
+    </div>
+    {% else %}
+    <div class="alert alert-ok">
+        <strong>READY</strong> — All critical checks pass. Promotion can proceed.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Detailed Results -->
+<div class="card">
+    <div class="card-header">Detailed Results</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Check</th>
+                <th>Environment</th>
+                <th>Result</th>
+                <th>Critical</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in results %}
+            <tr>
+                <td><strong>{{ r.label }}</strong></td>
+                <td>{{ r.env or '-' }}</td>
+                <td>
+                    <span class="badge {{ 'badge-ok' if r.passed else 'badge-fail' if r.critical else 'badge-warn' }}">
+                        {{ 'PASS' if r.passed else 'FAIL' if r.critical else 'WARN' }}
+                    </span>
+                </td>
+                <td>{{ '&#10003;' if r.critical else '-' }}</td>
+                <td style="max-width: 400px; word-break: break-all; color: var(--muted); font-size: 0.8rem;">
+                    {{ r.detail }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div style="margin-top: 1rem;">
+    <a href="/checks" class="btn">Re-run All Checks</a>
+</div>
+
+{% endblock %}

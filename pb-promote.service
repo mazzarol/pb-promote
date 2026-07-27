@@ -1,0 +1,29 @@
+[Unit]
+Description=PB-Promote — Odoo 19 CI/CD Pipeline Dashboard
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/pb-promote
+Environment="PATH=/opt/pb-promote/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PB_PROMOTE_DB=/opt/pb-promote/promotions.db"
+ExecStart=/opt/pb-promote/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/opt/pb-promote/logs/app.log
+StandardError=append:/opt/pb-promote/logs/app.log
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/pb-promote /opt/odoo19stage/.promotions /etc/odoo
+ReadOnlyPaths=/usr/lib/python3/dist-packages/odoo /opt/odoo19stage /opt/odoo19dev
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+
+[Install]
+WantedBy=multi-user.target

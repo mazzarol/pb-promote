@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — {{ app_title }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <h2>Dashboard</h2>
+    <p>Environment status and recent activity</p>
+</div>
+
+<!-- Environment Status Cards -->
+<div class="grid-3" style="margin-bottom: 2rem;">
+    {% for env in ('dev', 'stage', 'prod') %}
+    {% set s = env_status[env] %}
+    <div class="card env-card {{ env }}">
+        <div class="card-header">{{ env | upper }} Environment</div>
+        <div style="margin-bottom: 0.75rem;">
+            <span class="badge {{ 'badge-ok' if s.reachable else 'badge-fail' }}">
+                {{ s.http_status if s.http_status else 'OFFLINE' }}
+            </span>
+            <span class="badge {{ 'badge-ok' if s.service_active else 'badge-fail' }}" style="margin-left: 0.3rem;">
+                {{ s.service_status }}
+            </span>
+        </div>
+        <div style="font-size: 0.85rem; color: var(--muted); line-height: 1.6;">
+            <div><span class="status-dot {{ 'dot-ok' if s.reachable else 'dot-fail' }}"></span>
+                {{ s.response_ms }}ms response</div>
+            <div><span class="status-dot {{ 'dot-ok' if s.auth_ok else 'dot-fail' }}"></span>
+                XML-RPC: {{ 'OK' if s.auth_ok else 'FAIL' }}</div>
+            <div><span class="status-dot {{ 'dot-ok' if s.db_ok else 'dot-fail' }}"></span>
+                DB: {{ 'OK' if s.db_ok else 'FAIL' }}</div>
+            <div style="margin-top: 0.3rem;">
+                {{ s.modules }} modules &middot; port {{ s.config.port }}
+            </div>
+            {% if s.error %}
+            <div style="color: var(--red); margin-top: 0.3rem; word-break: break-all;">{{ s.error[:120] }}</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Git Status -->
+{% if git_status and git_status.is_repo %}
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">Git Status</div>
+    <div style="display: flex; gap: 1.5rem; font-size: 0.85rem;">
+        <div><strong>Branch:</strong> {{ git_status.branch }}</div>
+        <div><strong>Last:</strong> {{ git_status.last_commit }}</div>
+        <div>
+            <strong>Status:</strong>
+            {% if git_status.clean %}
+            <span class="badge badge-ok">Clean</span>
+            {% else %}
+            <span class="badge badge-warn">{{ git_status.uncommitted_count }} uncommitted</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Recent Promotions -->
+<div class="card">
+    <div class="card-header">Recent Promotions</div>
+    {% if recent_promotions %}
+    <table>
+        <thead>
+            <tr>
+                <th>Direction</th>
+                <th>Status</th>
+                <th>Files</th>
+                <th>Tag</th>
+                <th>Started</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in recent_promotions %}
+            <tr>
+                <td>{{ p.direction }}</td>
+                <td>
+                    <span class="badge {{ 'badge-ok' if p.status == 'success' else 'badge-fail' if p.status == 'failed' else 'badge-warn' }}">
+                        {{ p.status }}
+                    </span>
+                </td>
+                <td>{{ p.files }}</td>
+                <td><code>{{ p.tag }}</code></td>
+                <td style="color: var(--muted);">{{ p.started[:19] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--muted); font-size: 0.85rem;">No promotions recorded yet.</p>
+    {% endif %}
+</div>
+
+{% endblock %}

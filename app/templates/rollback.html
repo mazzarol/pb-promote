@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Rollback — {{ app_title }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <h2>Rollback</h2>
+    <p>Restore databases and code from pre-promotion backups</p>
+</div>
+
+<!-- Rollback Targets (from recent promotions) -->
+<div class="card">
+    <div class="card-header">Recent Promotions (Rollback Targets)</div>
+    {% if rollback_targets %}
+    <table>
+        <thead>
+            <tr><th>ID</th><th>Direction</th><th>Status</th><th>Tag</th><th>Started</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+            {% for p in rollback_targets %}
+            <tr>
+                <td>#{{ p.id }}</td>
+                <td>{{ p.direction }}</td>
+                <td><span class="badge badge-{{ 'ok' if p.status == 'success' else 'warn' }}">{{ p.status }}</span></td>
+                <td><code>{{ p.tag }}</code></td>
+                <td style="color: var(--muted);">{{ p.started[:19] }}</td>
+                <td>
+                    {% if p.direction == 'dev-to-stage' %}
+                    <button class="btn btn-sm" onclick="doRollback('stage', {{ p.id }})">Rollback Stage</button>
+                    {% else %}
+                    <button class="btn btn-sm btn-danger" onclick="doRollback('prod', {{ p.id }})">Rollback Prod</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--muted); font-size: 0.85rem;">No promotions with rollback data available.</p>
+    {% endif %}
+</div>
+
+<!-- Git Tags -->
+{% if git_tags %}
+<div class="card">
+    <div class="card-header">Git Tags (Code Rollback Anchors)</div>
+    <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        {% for tag in git_tags %}
+        <code class="badge badge-info">{{ tag }}</code>
+        {% endfor %}
+    </div>
+    <p style="font-size: 0.8rem; color: var(--muted); margin-top: 0.75rem;">
+        Use <code>git checkout &lt;tag&gt;</code> on the custom addons repo for code-only rollback.
+    </p>
+</div>
+{% endif %}
+
+<!-- Manual Rollback -->
+<div class="grid-2" style="margin-top: 1rem;">
+    <!-- Stage Rollback -->
+    <div class="card env-card stage">
+        <div class="card-header">Rollback Stage (Latest Backup)</div>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 0.75rem;">
+            Restore stage from the most recent backup. Stops stage, restores DB + code, restarts.
+        </p>
+        <button class="btn" onclick="doRollback('stage', 0)">Rollback Stage</button>
+        <div id="stage-result" style="margin-top: 0.75rem; font-size: 0.85rem;"></div>
+    </div>
+
+    <!-- Prod Rollback -->
+    <div class="card env-card prod">
+        <div class="card-header">Rollback Prod &#9888;</div>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 0.75rem;">
+            Restore production from backup. Stops prod, restores DB, restarts.
+            Requires confirmation.
+        </p>
+        <div style="margin-bottom: 0.75rem;">
+            <input type="text" id="prod-confirm" placeholder="Type PROD to confirm"
+                   style="max-width: 250px;" autocomplete="off">
+        </div>
+        <button class="btn btn-danger" onclick="doRollback('prod', 0)">Rollback Production</button>
+        <div id="prod-result" style="margin-top: 0.75rem; font-size: 0.85rem;"></div>
+    </div>
+</div>
+
+<!-- Available Backups -->
+{% if backups %}
+<div class="card" style="margin-top: 1rem;">
+    <div class="card-header">Available Backups ({{ backups|length }})</div>
+    <table>
+        <thead>
+            <tr><th>Backup</th><th>Contents</th></tr>
+        </thead>
+        <tbody>
+            {% for b in backups %}
+            <tr>
+                <td><code>{{ b.name }}</code></td>
+                <td style="color: var(--muted); font-size: 0.8rem;">
+                    {{ b.files|join(', ') }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<script>
+async function doRollback(env, promotionId) {
+    const resultId = env === 'stage' ? 'stage-result' : 'prod-result';
+    const el = document.getElementById(resultId);
+    el.innerHTML = '<span class="spinner"></span> Rolling back...';
+
+    const formData = new FormData();
+    formData.append('promotion_id', promotionId);
+
+    if (env === 'prod') {
+        const confirmVal = document.getElementById('prod-confirm').value;
+        if (confirmVal.trim().toUpperCase() !== 'PROD') {
+            el.innerHTML = '<span style="color: var(--red);">Must type PROD to confirm production rollback.</span>';
+            return;
+        }
+        formData.append('confirm', confirmVal);
+    }
+
+    try {
+        const resp = await fetch('/api/rollback/' + env, {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+
+        if (resp.ok && data.success) {
+            el.innerHTML = '<span style="color: var(--green);">Rollback complete! Stage: ' + data.stage + '</span>';
+        } else {
+            el.innerHTML = '<span style="color: var(--red);">Failed: ' + (data.error || data.detail || resp.statusText) + '</span>';
+        }
+    } catch (e) {
+        el.innerHTML = '<span style="color: var(--red);">Error: ' + e.message + '</span>';
+    }
+}
+</script>
+
+{% endblock %}

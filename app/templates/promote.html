@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Promote — {{ app_title }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <h2>Promote</h2>
+    <p>Controlled code promotion: dev &#8594; stage &#8594; prod</p>
+</div>
+
+<!-- Pre-flight Checks Summary -->
+<div class="card">
+    <div class="card-header">Pre-Flight Checks Summary</div>
+    {% if score %}
+    <div style="display: flex; gap: 1.5rem; margin-bottom: 1rem; font-size: 0.9rem;">
+        <div>
+            <strong>{{ score.passed }}</strong>/{{ score.total }} passed
+        </div>
+        {% if score.failed > 0 %}
+        <div style="color: var(--red);">
+            <strong>{{ score.failed }}</strong> critical failures
+        </div>
+        {% endif %}
+        {% if score.warnings > 0 %}
+        <div style="color: var(--orange);">
+            <strong>{{ score.warnings }}</strong> warnings
+        </div>
+        {% endif %}
+    </div>
+
+    {% if score.blocked %}
+    <div class="alert alert-err">
+        <strong>PROMOTION BLOCKED</strong> — {{ score.failed }} critical check(s) must pass first.
+        <a href="/checks" style="color: var(--accent); margin-left: 0.5rem;">View details &#8594;</a>
+    </div>
+    {% else %}
+    <div class="alert alert-ok">
+        <strong>All critical checks passed.</strong> Promotion can proceed.
+    </div>
+    {% endif %}
+
+    <!-- Quick check list -->
+    <div style="font-size: 0.8rem; color: var(--muted); max-height: 200px; overflow-y: auto;">
+        {% for r in check_results %}
+        <div style="padding: 0.2rem 0;">
+            <span class="status-dot {{ 'dot-ok' if r.passed else 'dot-fail' if r.critical else 'dot-warn' }}"></span>
+            {{ r.label }} —
+            <span style="color: {{ 'var(--green)' if r.passed else 'var(--red)' if r.critical else 'var(--orange)' }};">
+                {{ 'PASS' if r.passed else 'FAIL' if r.critical else 'WARN' }}
+            </span>
+            — {{ r.detail[:100] }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- File Diff -->
+{% if diff %}
+<div class="card">
+    <div class="card-header">Dev &#8594; Stage File Differences</div>
+    {% if diff.count == 0 %}
+    <p style="color: var(--green); font-size: 0.85rem;">No differences — stage is up to date.</p>
+    {% else %}
+    <p style="color: var(--orange); font-size: 0.85rem; margin-bottom: 0.75rem;">
+        {{ diff.count }} file(s) differ between dev and stage
+    </p>
+    <pre>{% for d in diff.diffs[:30] %}{{ d }}
+{% endfor %}</pre>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Promotion Actions -->
+<div class="grid-2">
+    <!-- Dev → Stage -->
+    <div class="card">
+        <div class="card-header">Dev &#8594; Stage</div>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem;">
+            Promote code from dev (port 8069) to stage (port 8070).
+            Runs promote.sh, clears .pyc, restarts stage, runs smoke tests.
+        </p>
+        <button class="btn btn-primary" onclick="doPromote('dev-to-stage')"
+                {% if score and score.blocked %}disabled{% endif %}>
+            Promote to Stage
+        </button>
+        <div id="dev-stage-result" style="margin-top: 0.75rem; font-size: 0.85rem;"></div>
+    </div>
+
+    <!-- Stage → Prod -->
+    <div class="card env-card prod">
+        <div class="card-header">Stage &#8594; Prod &#9888; PRODUCTION</div>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem;">
+            Promote code from stage to production (port 8069).
+            Creates backup, copies files, restarts prod, monitors for 5 minutes.
+        </p>
+        <div style="margin-bottom: 0.75rem;">
+            <input type="text" id="prod-confirm" placeholder="Type PROD to confirm"
+                   style="max-width: 250px;" autocomplete="off">
+        </div>
+        <button class="btn btn-danger" onclick="doPromote('stage-to-prod')"
+                {% if score and score.blocked %}disabled{% endif %}>
+            Promote to Production
+        </button>
+        <div id="stage-prod-result" style="margin-top: 0.75rem; font-size: 0.85rem;"></div>
+    </div>
+</div>
+
+<!-- Clone DB -->
+<div class="card" style="margin-top: 1rem;">
+    <div class="card-header">Database: Clone Prod &#8594; Stage</div>
+    <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 0.75rem;">
+        Refresh the stage database from production. Terminates stage connections, drops stage DB,
+        creates a fresh clone, and fixes ownership. No code changes.
+    </p>
+    <button class="btn" onclick="cloneDB()">Clone Database</button>
+    <div id="clone-result" style="margin-top: 0.75rem; font-size: 0.85rem;"></div>
+</div>
+
+<script>
+async function doPromote(direction) {
+    const id = direction === 'dev-to-stage' ? 'dev-stage-result' : 'stage-prod-result';
+    const el = document.getElementById(id);
+    el.innerHTML = '<span class="spinner"></span> Running...';
+
+    const formData = new FormData();
+
+    if (direction === 'stage-to-prod') {
+        const confirmVal = document.getElementById('prod-confirm').value;
+        if (confirmVal.trim().toUpperCase() !== 'PROD') {
+            el.innerHTML = '<span style="color: var(--red);">Must type PROD to confirm production promotion.</span>';
+            return;
+        }
+        formData.append('confirm', confirmVal);
+    }
+
+    try {
+        const resp = await fetch('/api/promote/' + direction, {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+
+        if (resp.ok && data.success) {
+            el.innerHTML = '<span style="color: var(--green);">Promotion complete! Stage: ' + data.stage
+                + ' | Files: ' + data.files_promoted + ' promoted, ' + data.files_skipped + ' skipped'
+                + (data.git_tag ? ' | Tag: ' + data.git_tag : '') + '</span>';
+
+            if (data.smoke_tests) {
+                el.innerHTML += '<br><span style="font-size: 0.8rem; color: var(--muted);">Smoke tests: '
+                    + JSON.stringify(data.smoke_tests) + '</span>';
+            }
+        } else {
+            el.innerHTML = '<span style="color: var(--red);">Failed: ' + (data.detail || data.error || resp.statusText) + '</span>';
+        }
+    } catch (e) {
+        el.innerHTML = '<span style="color: var(--red);">Error: ' + e.message + '</span>';
+    }
+}
+
+async function cloneDB() {
+    const el = document.getElementById('clone-result');
+    el.innerHTML = '<span class="spinner"></span> Cloning...';
+    try {
+        const resp = await fetch('/api/clone-db', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            el.innerHTML = '<span style="color: var(--green);">' + data.output + '</span>';
+        } else {
+            el.innerHTML = '<span style="color: var(--red);">' + (data.error || 'Clone failed') + '</span>';
+        }
+    } catch (e) {
+        el.innerHTML = '<span style="color: var(--red);">Error: ' + e.message + '</span>';
+    }
+}
+</script>
+
+{% endblock %}

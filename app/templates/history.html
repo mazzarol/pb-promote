@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}History — {{ app_title }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <h2>Promotion History</h2>
+    <p>Full audit trail of all promotions and rollbacks</p>
+</div>
+
+<!-- Promotions -->
+<div class="card">
+    <div class="card-header">Promotions ({{ promotions|length }})</div>
+    {% if promotions %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Direction</th>
+                <th>Status</th>
+                <th>Files</th>
+                <th>Tag</th>
+                <th>Started</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in promotions %}
+            <tr>
+                <td>#{{ p.id }}</td>
+                <td>{{ p.direction }}</td>
+                <td>
+                    <span class="badge {{ 'badge-ok' if p.status == 'success' else 'badge-fail' if p.status == 'failed' else 'badge-warn' }}">
+                        {{ p.status }}
+                    </span>
+                </td>
+                <td>{{ p.files_promoted }} / {{ p.files_skipped }}</td>
+                <td><code>{{ p.git_tag or '-' }}</code></td>
+                <td style="color: var(--muted);">{{ p.started_at[:19] }}</td>
+                <td style="color: var(--red); font-size: 0.8rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    {{ p.error_message or '' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--muted); font-size: 0.85rem;">No promotions recorded yet.</p>
+    {% endif %}
+</div>
+
+<!-- Rollbacks -->
+<div class="card" style="margin-top: 1rem;">
+    <div class="card-header">Rollbacks ({{ rollbacks|length }})</div>
+    {% if rollbacks %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Promotion</th>
+                <th>Env</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rollbacks %}
+            <tr>
+                <td>#{{ r.id }}</td>
+                <td>{% if r.promotion_id %}#{{ r.promotion_id }}{% else %}-{% endif %}</td>
+                <td>{{ r.environment }}</td>
+                <td>
+                    <span class="badge {{ 'badge-ok' if r.status == 'success' else 'badge-fail' }}">
+                        {{ r.status }}
+                    </span>
+                </td>
+                <td style="color: var(--muted);">{{ r.started_at[:19] }}</td>
+                <td style="color: var(--red); font-size: 0.8rem;">{{ r.error_message or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--muted); font-size: 0.85rem;">No rollbacks recorded yet.</p>
+    {% endif %}
+</div>
+
+{% endblock %}
