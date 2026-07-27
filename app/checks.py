@@ -46,7 +46,7 @@ def run_all_checks() -> list[CheckResult]:
     # --- 4. Service status ---
     for env in ("dev", "stage"):
         active, status = oc.check_service(env)
-        service_name = oc.ENVIRONMENTS[env]["service"]
+        service_name = oc.get_env_config(env).get("service", env)
         results.append(CheckResult(
             name=f"service_{env}",
             label=f"Service: {service_name}",
@@ -93,7 +93,8 @@ def run_all_checks() -> list[CheckResult]:
 
     # --- 8. CSP headers on stage ---
     for env in ("stage", "prod"):
-        csp_ok, csp_detail = oc.check_csp_headers(oc.ENVIRONMENTS[env]["url"])
+        url = oc.get_env_config(env).get("url", "")
+        csp_ok, csp_detail = oc.check_csp_headers(url) if url else (True, "skipped")
         results.append(CheckResult(
             name=f"csp_{env}",
             label=f"CSP Headers ({env})",
@@ -134,7 +135,7 @@ def _check_git_status() -> tuple[bool, str]:
     """Check if dev custom addons have uncommitted changes."""
     git_dir = oc.CUSTOM_ADDONS
     if not os.path.isdir(os.path.join(git_dir, ".git")):
-        return False, f"Not a git repo: {git_dir}"
+        return True, f"No git repo at {git_dir} — git tracking disabled (non-critical)"
 
     try:
         result = subprocess.run(

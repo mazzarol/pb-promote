@@ -116,10 +116,7 @@ def create_app() -> FastAPI:
         ]
 
         # Git status
-        if gitops.is_git_repo():
-            ctx["git_status"] = gitops.get_status()
-        else:
-            ctx["git_status"] = {"is_repo": False}
+        ctx["git_status"] = gitops.get_status_safe()
 
         return render_template("dashboard.html", ctx)
 
@@ -138,10 +135,7 @@ def create_app() -> FastAPI:
         ctx["diff"] = oc.get_file_diff()
 
         # Git status
-        if gitops.is_git_repo():
-            ctx["git_status"] = gitops.get_status()
-        else:
-            ctx["git_status"] = {"is_repo": False}
+        ctx["git_status"] = gitops.get_status_safe()
 
         return render_template("promote.html", ctx)
 

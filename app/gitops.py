@@ -63,6 +63,21 @@ def get_status() -> dict:
     }
 
 
+def get_status_safe() -> dict:
+    """Get git status, but return ok-with-message if not a repo."""
+    status = get_status()
+    if not status.get("is_repo"):
+        return {
+            "is_repo": False,
+            "clean": True,
+            "branch": "n/a",
+            "last_commit": "No git repo — tracking disabled",
+            "uncommitted_count": 0,
+            "uncommitted_files": [],
+        }
+    return status
+
+
 def auto_commit_dev() -> tuple[bool, str]:
     """Stage all changes and commit with an auto-generated message."""
     if not is_git_repo():

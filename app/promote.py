@@ -69,7 +69,7 @@ def create_backup(env: str, direction: str) -> dict:
         return result
 
     # Code backup
-    code_root = STAGE_CODE_ROOT if env == "stage" else oc.ENVIRONMENTS[env]["code_root"]
+    code_root = STAGE_CODE_ROOT if env == "stage" else oc.get_env_config(env).get("code_root", "/usr/lib/python3/dist-packages")
     code_path = os.path.join(backup_dir, "code")
     try:
         # Copy only tracked files to save space
@@ -257,7 +257,7 @@ def promote_stage_to_prod() -> PromotionResult:
 
 def _run_smoke_tests(env: str) -> dict:
     """Run post-promotion smoke tests on an environment."""
-    conf = oc.ENVIRONMENTS[env]
+    conf = oc.get_env_config(env)
     results = {
         "service_alive": False,
         "http_ok": False,
