@@ -84,7 +84,7 @@ def _run(cmd: list, timeout: int = 15) -> tuple[str, str, int]:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return r.stdout.strip(), r.stderr.strip(), r.returncode
     except subprocess.TimeoutExpired:
-        return "", "timeout", -1
+        return "", f"timeout after {timeout}s", -1
     except FileNotFoundError:
         return "", "not found", -2
     except Exception as e:
@@ -167,6 +167,10 @@ def check_mail_log(minutes: int = 60) -> list:
 def check_odoo_email_activity(env: str, url: str, db: str, username: str, api_key: str) -> dict:
     """Query Odoo for recent email activity via XML-RPC."""
     import xmlrpc.client
+    import socket
+
+    # Set socket timeout to prevent hanging (default is no timeout)
+    socket.setdefaulttimeout(10)
 
     result = {
         "recent_sent": 0,
@@ -492,54 +496,85 @@ def check_system_health() -> SystemHealth:
 
 def collect_full_snapshot(db_session=None) -> MonitorSnapshot:
     """Collect all monitoring data into a single snapshot."""
+    import socket
     from . import odoo_client as oc
+
+    # Prevent any network call from hanging the worker
+    socket.setdefaulttimeout(10)
 
     snap = MonitorSnapshot()
     snap.timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    start = time.time()
+    max_total = 30  # Never take more than 30s total
+
+    def _elapsed() -> float:
+        return time.time() - start
 
     # ── Email gateway ──
     email = EmailGatewayStatus()
-    email.postfix_active, email.postfix_status = check_postfix()
-    email.mail_queue_size, email.mail_queue_deferred = check_mail_queue()
-    email.recent_log_entries = check_mail_log()
+    try:
+        email.postfix_active, email.postfix_status = check_postfix()
+        email.mail_queue_size, email.mail_queue_deferred = check_mail_queue()
+        email.recent_log_entries = check_mail_log()
+        email.recent_deliveries = sum(1 for e in email.recent_log_entries if e["type"] == "sent")
+        email.recent_bounces = sum(1 for e in email.recent_log_entries if e["type"] == "bounce")
+    except Exception as e:
+        email.error = f"Email check failed: {str(e)[:100]}"
 
-    # Aggregate delivery/bounce counts from log entries
-    email.recent_deliveries = sum(1 for e in email.recent_log_entries if e["type"] == "sent")
-    email.recent_bounces = sum(1 for e in email.recent_log_entries if e["type"] == "bounce")
-
-    # Odoo email activity (query dev as canonical)
-    dev_cfg = oc.get_env_config("dev")
-    api_key = oc.get_env_api_key("dev")
-    odoo_email = check_odoo_email_activity(
-        "dev", dev_cfg["url"], dev_cfg["db"], dev_cfg["username"], api_key
-    )
-    email.odoo_mail_servers = odoo_email.get("mail_servers", [])
-    email.error = odoo_email.get("error", "")
+    # Odoo email activity (query dev as canonical) — skip if running out of time
+    if _elapsed() < max_total * 0.5:
+        try:
+            dev_cfg = oc.get_env_config("dev")
+            api_key = oc.get_env_api_key("dev")
+            odoo_email = check_odoo_email_activity(
+                "dev", dev_cfg["url"], dev_cfg["db"], dev_cfg["username"], api_key
+            )
+            email.odoo_mail_servers = odoo_email.get("mail_servers", [])
+            if not email.error:
+                email.error = odoo_email.get("error", "")
+        except Exception as e:
+            if not email.error:
+                email.error = f"Odoo email query failed: {str(e)[:100]}"
 
     snap.email = email
 
     # ── SMS gateway ──
-    snap.sms = check_sms_docker()
+    try:
+        snap.sms = check_sms_docker()
+    except Exception as e:
+        snap.sms = SmsGatewayStatus(error=f"SMS check failed: {str(e)[:100]}")
+        snap.sms.configured = False
 
     # ── Odoo errors ──
-    for env in ("dev", "stage", "prod"):
-        cfg = oc.get_env_config(env)
-        service = cfg.get("service", f"odoo19{env}")
-        snap.odoo_errors[env] = check_odoo_errors(env, service)
+    if _elapsed() < max_total * 0.7:
+        try:
+            for env in ("dev", "stage", "prod"):
+                cfg = oc.get_env_config(env)
+                service = cfg.get("service", f"odoo19{env}")
+                snap.odoo_errors[env] = check_odoo_errors(env, service)
+        except Exception:
+            pass
 
     # ── System ──
-    snap.system = check_system_health()
+    try:
+        snap.system = check_system_health()
+    except Exception:
+        pass
 
-    # ── Env health (quick) ──
-    for env in ("dev", "stage", "prod"):
-        h = oc.full_health_check(env)
-        snap.env_health[env] = {
-            "reachable": h.reachable,
-            "auth_ok": h.auth_ok,
-            "db_ok": h.db_ok,
-            "http_status": h.http_status,
-            "response_ms": round(h.response_time_ms),
-            "error": h.error,
-        }
+    # ── Env health (quick) — skip if almost out of time
+    if _elapsed() < max_total * 0.85:
+        try:
+            for env in ("dev", "stage", "prod"):
+                h = oc.full_health_check(env)
+                snap.env_health[env] = {
+                    "reachable": h.reachable,
+                    "auth_ok": h.auth_ok,
+                    "db_ok": h.db_ok,
+                    "http_status": h.http_status,
+                    "response_ms": round(h.response_time_ms),
+                    "error": h.error,
+                }
+        except Exception:
+            pass
 
     return snap
