@@ -27,3 +27,6 @@ logs/
 # Secrets
 odoo_api_key.txt
 .env
+
+# Hermes dev tools 
+.hermes/
