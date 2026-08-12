@@ -31,7 +31,7 @@ def create_app() -> FastAPI:
 
     # Templates — use Jinja2 directly (Starlette Jinja2Templates broken with Jinja2 3.1.4+)
     from jinja2 import Environment, FileSystemLoader, select_autoescape
-    templates_dir = "/opt/pb-promote/app/templates"
+    templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
     jinja_env = Environment(
         loader=FileSystemLoader(templates_dir),
         autoescape=select_autoescape(["html"]),
