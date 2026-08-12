@@ -22,27 +22,30 @@ socket.setdefaulttimeout(10)
 ENVIRONMENTS = {
     "dev": {
         "url": "https://dev.priorityblinds.com.au",
+        "internal_url": "http://127.0.0.1:8073",
         "db": "odoo19dev",
         "username": "pb-promote",
-        "port": 8069,
+        "port": 8073,
         "code_root": "/usr/lib/python3/dist-packages",
-        "service": "odoo",
+        "service": "odoo19dev",
     },
     "stage": {
         "url": "https://stage.priorityblinds.com.au",
+        "internal_url": "http://127.0.0.1:8074",
         "db": "odoo19stage",
         "username": "pb-promote",
-        "port": 8070,
+        "port": 8074,
         "code_root": "/opt/odoo19stage",
-        "service": "odoo-stage",
+        "service": "odoo19stage",
     },
     "prod": {
         "url": "https://priorityblinds.com.au",
+        "internal_url": "http://127.0.0.1:8075",
         "db": "odoo19prod",
         "username": "pb-promote",
-        "port": 8069,
+        "port": 8075,
         "code_root": "/usr/lib/python3/dist-packages",
-        "service": "odoo",
+        "service": "odoo19prod",
     },
 }
 
@@ -228,7 +231,12 @@ def full_health_check(env: str) -> OdooHealth:
     conf = get_env_config(env)
     h = OdooHealth(env=env)
 
-    # HTTP check
+    # XML-RPC / module checks use the INTERNAL url (127.0.0.1:port) — the
+    # public url routes through nginx/LiteSpeed which may 404 on /xmlrpc/
+    # (prod's LiteSpeed edge proxy doesn't pass /xmlrpc/2/* through).
+    xmlrpc_url = conf.get("internal_url", conf["url"])
+
+    # HTTP check (public reachability)
     h.http_status, h.response_time_ms = check_http(conf["url"], timeout=10)
     h.reachable = h.http_status in (200, 301, 302, 303, 307, 308)
 
@@ -237,7 +245,7 @@ def full_health_check(env: str) -> OdooHealth:
         return h
 
     # XML-RPC auth
-    h.xmlrpc_ok, err = check_xmlrpc(env, conf["url"], conf["db"], conf["username"])
+    h.xmlrpc_ok, err = check_xmlrpc(env, xmlrpc_url, conf["db"], conf["username"])
     h.auth_ok = h.xmlrpc_ok
     if not h.xmlrpc_ok:
         h.error = err
@@ -251,7 +259,7 @@ def full_health_check(env: str) -> OdooHealth:
 
     # Module count
     h.modules_loaded, _ = check_modules(
-        env, conf["url"], conf["db"], conf["username"]
+        env, xmlrpc_url, conf["db"], conf["username"]
     )
 
     return h
