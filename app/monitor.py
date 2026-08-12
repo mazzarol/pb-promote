@@ -28,13 +28,19 @@ class EmailGatewayStatus:
 
 @dataclass
 class SmsGatewayStatus:
-    """SMS gateway health (via Odoo ir_mail_server or custom module)."""
+    """SMS gateway health — Docker containers, mock services, and Android SMS Gateway."""
     configured: bool = False
-    server_name: str = ""
-    smtp_host: str = ""
-    recent_sms_count: int = 0
-    recent_sms_log: list = field(default_factory=list)
     error: str = ""
+    # Docker containers
+    docker_ok: bool = False
+    containers: list = field(default_factory=list)
+    # Mock SMS (dev + stage)
+    mock_dev: dict = field(default_factory=dict)
+    mock_stage: dict = field(default_factory=dict)
+    # Real SMS Gateway (prod)
+    gateway_server: dict = field(default_factory=dict)
+    gateway_worker: dict = field(default_factory=dict)
+    gateway_db: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -254,102 +260,111 @@ def check_odoo_email_activity(env: str, url: str, db: str, username: str, api_ke
     return result
 
 
-def check_sms_gateway(env: str, url: str, db: str, username: str, api_key: str) -> SmsGatewayStatus:
-    """Check SMS gateway configuration via Odoo XML-RPC."""
-    import xmlrpc.client
+# ── SMS Gateway (Docker) ──────────────────────────────────────────────
 
+SMS_CONTAINERS = [
+    {"name": "sms-mock-dev", "label": "SMS Mock (Dev)", "port": 3098, "health_url": "http://127.0.0.1:3098/health", "env": "dev"},
+    {"name": "sms-mock-stage", "label": "SMS Mock (Stage)", "port": 3099, "health_url": "http://127.0.0.1:3099/health", "env": "stage"},
+    {"name": "sms-gateway-server-1", "label": "SMS Gateway Server (Prod)", "port": 3000, "env": "prod"},
+    {"name": "sms-gateway-worker-1", "label": "SMS Gateway Worker", "env": "prod"},
+    {"name": "sms-gateway-db-1", "label": "SMS Gateway DB (MariaDB)", "env": "prod"},
+]
+
+
+def _docker_ps() -> dict:
+    """Parse docker ps into a dict of container_name -> status info."""
+    out, _, rc = _run(
+        ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}"],
+        timeout=10,
+    )
+    result = {}
+    if rc != 0 or not out:
+        return result
+    for line in out.strip().split("\n"):
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 3:
+            name = parts[0]
+            status = parts[1]
+            image = parts[2]
+            ports = parts[3] if len(parts) > 3 else ""
+            result[name] = {"status": status, "image": image, "ports": ports}
+    return result
+
+
+def _http_get_json(url: str, timeout: int = 5) -> tuple[bool, dict, str]:
+    """GET a JSON endpoint, return (ok, data_dict, error)."""
+    import urllib.request
+    import ssl
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(url)
+        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        data = json.loads(resp.read().decode())
+        return True, data, ""
+    except Exception as e:
+        return False, {}, str(e)[:150]
+
+
+def check_sms_docker() -> SmsGatewayStatus:
+    """Check all SMS Docker containers and mock/gateway health endpoints."""
     status = SmsGatewayStatus()
 
-    if not api_key:
-        status.error = "No API key"
+    containers = _docker_ps()
+    if not containers:
+        status.error = "Docker not accessible or no containers"
         return status
 
-    try:
-        common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common", allow_none=True)
-        uid = common.authenticate(db, username, api_key, {})
-        if not uid:
-            status.error = "Auth failed"
-            return status
+    status.docker_ok = True
+    status.configured = True  # We found SMS containers
 
-        models = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/object", allow_none=True)
+    for cfg in SMS_CONTAINERS:
+        name = cfg["name"]
+        docker_info = containers.get(name)
+        info = {
+            "name": name,
+            "label": cfg["label"],
+            "env": cfg["env"],
+            "running": docker_info is not None,
+            "status": docker_info["status"] if docker_info else "not found",
+            "image": docker_info["image"] if docker_info else "",
+            "ports": docker_info["ports"] if docker_info else "",
+        }
 
-        # Look for SMS mail servers
-        sms_server_ids = models.execute_kw(
-            db, uid, api_key,
-            "ir.mail_server", "search",
-            [[["name", "ilike", "%sms%"]]],
-        )
+        # Health check for mock services
+        if "health_url" in cfg:
+            ok, data, err = _http_get_json(cfg["health_url"])
+            info["health_ok"] = ok
+            info["health_data"] = data
+            info["health_error"] = err
 
-        if not sms_server_ids:
-            # Try looking for SMS by SMTP host
-            sms_server_ids = models.execute_kw(
-                db, uid, api_key,
-                "ir.mail_server", "search",
-                [[["smtp_host", "ilike", "%sms%"]]],
-            )
+        status.containers.append(info)
 
-        if sms_server_ids:
-            servers = models.execute_kw(
-                db, uid, api_key,
-                "ir.mail_server", "read",
-                [sms_server_ids],
-                {"fields": ["name", "smtp_host", "smtp_port", "smtp_user", "active"]},
-            )
-            if servers:
-                s = servers[0]
-                status.configured = True
-                status.server_name = s.get("name", "")
-                status.smtp_host = s.get("smtp_host", "")
-                status.smtp_port = s.get("smtp_port", 0)
-                status.smtp_active = s.get("active", False)
-
-        # Check for SMS-related modules
-        sms_module_ids = models.execute_kw(
-            db, uid, api_key,
-            "ir.module.module", "search",
-            [[["name", "ilike", "%sms%"], ["state", "=", "installed"]]],
-        )
-        if sms_module_ids:
-            sms_modules = models.execute_kw(
-                db, uid, api_key,
-                "ir.module.module", "read",
-                [sms_module_ids],
-                {"fields": ["name", "shortdesc"]},
-            )
-            status.sms_modules = [
-                {"name": m.get("name", ""), "desc": m.get("shortdesc", "")}
-                for m in sms_modules
-            ]
-
-        # Check for recent SMS mail.mail records
-        if sms_server_ids or sms_module_ids:
-            sms_mail_ids = models.execute_kw(
-                db, uid, api_key,
-                "mail.mail", "search",
-                [[["mail_server_id", "in", sms_server_ids]]] if sms_server_ids else [[]],
-                {"order": "create_date desc", "limit": 10},
-            )
-            status.recent_sms_count = len(sms_mail_ids)
-
-            if sms_mail_ids:
-                sms_data = models.execute_kw(
-                    db, uid, api_key,
-                    "mail.mail", "read",
-                    [sms_mail_ids[:5]],
-                    {"fields": ["subject", "state", "create_date", "email_to"]},
-                )
-                status.recent_sms_log = [
-                    {
-                        "subject": m.get("subject", "")[:60],
-                        "state": m.get("state", ""),
-                        "to": m.get("email_to", "")[:40],
-                        "date": m.get("create_date", ""),
-                    }
-                    for m in sms_data
-                ]
-
-    except Exception as e:
-        status.error = str(e)[:200]
+        # Populate convenience slots
+        if name == "sms-mock-dev":
+            status.mock_dev = info
+        elif name == "sms-mock-stage":
+            status.mock_stage = info
+        elif name == "sms-gateway-server-1":
+            status.gateway_server = info
+            # Additional: check if gateway web UI is reachable
+            import urllib.request, ssl
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request("http://127.0.0.1:3000/")
+                resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                info["web_ui_ok"] = resp.status == 200
+            except Exception:
+                info["web_ui_ok"] = False
+        elif name == "sms-gateway-worker-1":
+            status.gateway_worker = info
+        elif name == "sms-gateway-db-1":
+            status.gateway_db = info
 
     return status
 
@@ -504,9 +519,7 @@ def collect_full_snapshot(db_session=None) -> MonitorSnapshot:
     snap.email = email
 
     # ── SMS gateway ──
-    snap.sms = check_sms_gateway(
-        "dev", dev_cfg["url"], dev_cfg["db"], dev_cfg["username"], api_key
-    )
+    snap.sms = check_sms_docker()
 
     # ── Odoo errors ──
     for env in ("dev", "stage", "prod"):

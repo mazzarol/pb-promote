@@ -148,70 +148,93 @@
 
 <!-- ═══ SMS GATEWAY ═══ -->
 <div class="card-header" style="margin-bottom: 0.75rem;">&#128172; SMS Gateway</div>
+
+{% if not sms.configured %}
 <div class="card" style="margin-bottom: 1.5rem;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-            <strong>Status:</strong>
-            {% if sms.configured %}
-            <span class="badge badge-ok">&#10003; Configured</span>
-            {% else %}
-            <span class="badge badge-warn">&#9888; Not configured</span>
-            {% endif %}
-        </div>
-        {% if sms.recent_sms_count > 0 %}
-        <span style="font-size: 0.85rem;"><strong>{{ sms.recent_sms_count }}</strong> recent SMS</span>
+    <span class="badge badge-warn">&#9888; No SMS containers detected</span>
+    {% if sms.error %}<div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--orange);">{{ sms.error }}</div>{% endif %}
+</div>
+{% else %}
+<!-- Docker container status cards -->
+<div class="grid-3" style="margin-bottom: 1rem;">
+    {% for c in sms.containers %}
+    <div class="card {{ 'env-card dev' if c.env == 'dev' else 'env-card stage' if c.env == 'stage' else 'env-card prod' if c.env == 'prod' else '' }}" style="text-align: center;">
+        <div style="font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem;">{{ c.label }}</div>
+        {% if c.running %}
+        <span class="badge badge-ok">&#10003; Running</span>
+        {% else %}
+        <span class="badge badge-fail">&#10007; Stopped</span>
+        {% endif %}
+        <div style="font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem;">{{ c.status }}</div>
+        {% if c.ports %}
+        <div style="font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem;">{{ c.ports }}</div>
         {% endif %}
     </div>
+    {% endfor %}
+</div>
 
-    {% if sms.configured %}
-    <div style="margin-top: 0.75rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem;">
-        <div><span style="color: var(--muted);">Server:</span> {{ sms.server_name }}</div>
-        <div><span style="color: var(--muted);">Host:</span> {{ sms.smtp_host }}</div>
-        <div>
-            <span style="color: var(--muted);">Active:</span>
-            {% if sms.smtp_active %}
-            <span style="color: var(--green);">Yes</span>
-            {% else %}
-            <span style="color: var(--red);">No</span>
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if sms.sms_modules %}
-    <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted);">
-        Installed SMS modules:
-        {% for mod in sms.sms_modules %}
-        <span class="badge badge-info">{{ mod.name }}</span>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    {% if sms.recent_sms_log %}
-    <table style="margin-top: 0.75rem;">
-        <tr><th>Subject</th><th>State</th><th>Date</th></tr>
-        {% for sms in sms.recent_sms_log %}
+<!-- Mock SMS detail -->
+{% if sms.mock_dev.running or sms.mock_stage.running %}
+<div class="card" style="margin-bottom: 1rem;">
+    <strong>Mock SMS Services</strong>
+    <table style="margin-top: 0.5rem;">
+        <tr><th>Env</th><th>Health API</th><th>Messages Queued</th></tr>
+        {% if sms.mock_dev.running %}
         <tr>
-            <td>{{ sms.subject }}</td>
+            <td><span class="badge" style="background: rgba(39,174,96,0.15); color: #27ae60;">DEV</span></td>
             <td>
-                {% if sms.state == 'sent' %}
-                <span class="badge badge-ok">sent</span>
-                {% elif sms.state == 'exception' %}
-                <span class="badge badge-fail">failed</span>
+                {% if sms.mock_dev.health_ok %}
+                <span class="badge badge-ok">&#10003; {{ sms.mock_dev.health_data.get('status', 'ok') }}</span>
                 {% else %}
-                <span class="badge badge-info">{{ sms.state }}</span>
+                <span class="badge badge-fail">&#10007; Down</span>
                 {% endif %}
             </td>
-            <td style="font-size: 0.8rem; color: var(--muted);">{{ sms.date }}</td>
+            <td>{{ sms.mock_dev.health_data.get('messages', 0) }}</td>
         </tr>
-        {% endfor %}
+        {% endif %}
+        {% if sms.mock_stage.running %}
+        <tr>
+            <td><span class="badge" style="background: rgba(230,126,34,0.15); color: #e67e22;">STAGE</span></td>
+            <td>
+                {% if sms.mock_stage.health_ok %}
+                <span class="badge badge-ok">&#10003; {{ sms.mock_stage.health_data.get('status', 'ok') }}</span>
+                {% else %}
+                <span class="badge badge-fail">&#10007; Down</span>
+                {% endif %}
+            </td>
+            <td>{{ sms.mock_stage.health_data.get('messages', 0) }}</td>
+        </tr>
+        {% endif %}
     </table>
-    {% endif %}
-
-    {% if sms.error %}
-    <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--orange);">{{ sms.error }}</div>
-    {% endif %}
 </div>
+{% endif %}
+
+<!-- SMS Gateway Server (prod) -->
+{% if sms.gateway_server.running %}
+<div class="card" style="margin-bottom: 0.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <strong>&#128241; Android SMS Gateway Server (Prod)</strong>
+        {% if sms.gateway_server.web_ui_ok %}
+        <span class="badge badge-ok">Web UI reachable</span>
+        {% else %}
+        <span class="badge badge-warn">Web UI: {{ 'reachable' if sms.gateway_server.web_ui_ok is defined and sms.gateway_server.web_ui_ok else 'unreachable' }}</span>
+        {% endif %}
+    </div>
+    <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted);">
+        Image: <code>{{ sms.gateway_server.image }}</code> ·
+        DB: {{ 'Up' if sms.gateway_db.running else 'Down' }} ·
+        Worker: {{ 'Up' if sms.gateway_worker.running else 'Down' }}
+    </div>
+    <div style="margin-top: 0.25rem; font-size: 0.75rem; color: var(--muted);">
+        Connects to real mobile phone running SMSGate app for production SMS.
+    </div>
+</div>
+{% endif %}
+
+{% if sms.error and sms.docker_ok %}
+<div style="font-size: 0.8rem; color: var(--orange); margin-bottom: 1rem;">{{ sms.error }}</div>
+{% endif %}
+{% endif %}
 
 <!-- ═══ ODOO ISSUES ═══ -->
 <div class="card-header" style="margin-bottom: 0.75rem;">&#128030; Odoo Issues (last 2 hours)</div>
