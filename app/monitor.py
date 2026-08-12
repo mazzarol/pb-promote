@@ -169,9 +169,6 @@ def check_odoo_email_activity(env: str, url: str, db: str, username: str, api_ke
     import xmlrpc.client
     import socket
 
-    # Set socket timeout to prevent hanging (default is no timeout)
-    socket.setdefaulttimeout(10)
-
     result = {
         "recent_sent": 0,
         "recent_failed": 0,
@@ -183,6 +180,8 @@ def check_odoo_email_activity(env: str, url: str, db: str, username: str, api_ke
         result["error"] = "No API key"
         return result
 
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(10)
     try:
         common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common", allow_none=True)
         uid = common.authenticate(db, username, api_key, {})
@@ -258,8 +257,24 @@ def check_odoo_email_activity(env: str, url: str, db: str, username: str, api_ke
         except Exception:
             pass
 
+        # Close XML-RPC connections to prevent FD leaks
+        try:
+            common("close")()
+        except Exception:
+            pass
+        try:
+            models("close")()
+        except Exception:
+            pass
+
     except Exception as e:
         result["error"] = str(e)[:200]
+    finally:
+        # Restore previous timeout (or None if there wasn't one)
+        if old_timeout is not None:
+            socket.setdefaulttimeout(old_timeout)
+        else:
+            socket.setdefaulttimeout(None)
 
     return result
 
