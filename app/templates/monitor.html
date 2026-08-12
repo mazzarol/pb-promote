@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}{{ app_title }} — Monitor{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h2>&#128269; Monitor</h2>
+        <p>Email gateway, SMS gateway, Odoo issues &amp; system health</p>
+    </div>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <span style="font-size: 0.8rem; color: var(--muted);" id="refresh-counter">Auto-refresh in 30s</span>
+        <button class="btn btn-sm" onclick="location.reload()" id="refresh-btn">&#8635; Refresh Now</button>
+    </div>
+</div>
+
+{% if error %}
+<div class="alert alert-err">{{ error }}</div>
+{% endif %}
+
+<!-- ═══ SYSTEM HEALTH ═══ -->
+<div class="card-header" style="margin-bottom: 0.75rem;">&#9881; System Health</div>
+<div class="grid-3" style="margin-bottom: 1.5rem;">
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+                <span style="color: var(--muted); font-size: 0.8rem;">UPTIME</span>
+                <div style="font-size: 1.1rem; margin-top: 0.25rem;">{{ system.uptime or 'unknown' }}</div>
+            </div>
+            <span style="font-size: 1.5rem; opacity: 0.6;">&#9202;</span>
+        </div>
+        {% if system.load_avg %}
+        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted);">Load: {{ system.load_avg }}</div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+                <span style="color: var(--muted); font-size: 0.8rem;">MEMORY</span>
+                <div style="font-size: 1.1rem; margin-top: 0.25rem;">{{ system.mem_used }} / {{ system.mem_total }}</div>
+            </div>
+            <span style="font-size: 1.5rem; opacity: 0.6;">&#9760;</span>
+        </div>
+        <div class="progress-bar" style="margin-top: 0.5rem;">
+            {% set mem_pct = system.mem_pct|float|default(0) %}
+            <div class="progress-fill {{ 'fill-ok' if mem_pct < 70 else 'fill-warn' }}" style="width: {{ mem_pct }}%;"></div>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--muted);">{{ "%.0f"|format(mem_pct) }}% used</div>
+    </div>
+
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+                <span style="color: var(--muted); font-size: 0.8rem;">DISK</span>
+                <div style="font-size: 1.1rem; margin-top: 0.25rem;">{{ system.disk_free }} free</div>
+            </div>
+            <span style="font-size: 1.5rem; opacity: 0.6;">&#128190;</span>
+        </div>
+        <div class="progress-bar" style="margin-top: 0.5rem;">
+            {% set disk_pct = system.disk_pct|float|default(0) %}
+            <div class="progress-fill {{ 'fill-ok' if disk_pct < 80 else 'fill-warn' }}" style="width: {{ disk_pct }}%;"></div>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--muted);">{{ "%.0f"|format(disk_pct) }}% used</div>
+    </div>
+</div>
+
+<!-- ═══ EMAIL GATEWAY ═══ -->
+<div class="card-header" style="margin-bottom: 0.75rem;">&#9993; Email Gateway</div>
+<div class="grid-2" style="margin-bottom: 1.5rem;">
+    <!-- Postfix Status -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>Postfix</strong>
+            {% if email.postfix_active %}
+            <span class="badge badge-ok">&#10003; Active</span>
+            {% else %}
+            <span class="badge badge-fail">&#10007; {{ email.postfix_status }}</span>
+            {% endif %}
+        </div>
+
+        <div style="margin-top: 0.75rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem;">
+            <div>
+                <span style="color: var(--muted);">Mail Queue:</span>
+                <strong>{{ email.mail_queue_size }}</strong>
+                {% if email.mail_queue_deferred > 0 %}
+                <span style="color: var(--orange); font-size: 0.8rem;">({{ email.mail_queue_deferred }} deferred)</span>
+                {% endif %}
+            </div>
+            <div>
+                <span style="color: var(--muted);">Recent Sent:</span>
+                <strong style="color: var(--green);">{{ email.recent_deliveries }}</strong>
+            </div>
+            <div>
+                <span style="color: var(--muted);">Recent Bounces:</span>
+                <strong style="color: {{ 'var(--red)' if email.recent_bounces > 0 else 'var(--muted)' }};">{{ email.recent_bounces }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Odoo Mail Servers -->
+    <div class="card">
+        <strong>Odoo Mail Servers</strong>
+        {% if email.odoo_mail_servers %}
+        <table style="margin-top: 0.5rem;">
+            <tr><th>Name</th><th>Host</th><th>Status</th></tr>
+            {% for ms in email.odoo_mail_servers %}
+            <tr>
+                <td>{{ ms.name }}</td>
+                <td><code>{{ ms.host }}:{{ ms.port }}</code></td>
+                <td>
+                    {% if ms.active %}
+                    <span class="badge badge-ok">active</span>
+                    {% else %}
+                    <span class="badge badge-fail">inactive</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p style="color: var(--muted); margin-top: 0.5rem; font-size: 0.85rem;">No mail servers configured{% if email.error %} — {{ email.error }}{% endif %}</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Recent Mail Log -->
+{% if email.recent_log_entries %}
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">Recent Mail Log Activity (last 15 entries)</div>
+    <div style="max-height: 250px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem;">
+        {% for entry in email.recent_log_entries %}
+        <div style="padding: 0.2rem 0; border-bottom: 1px solid var(--border);">
+            {% if entry.type == 'sent' %}
+            <span style="color: var(--green);">&#10003;</span>
+            {% elif entry.type == 'bounce' %}
+            <span style="color: var(--red);">&#10007;</span>
+            {% elif entry.type == 'deferred' %}
+            <span style="color: var(--orange);">&#8635;</span>
+            {% else %}
+            <span style="color: var(--red);">&#9888;</span>
+            {% endif %}
+            <span style="color: var(--muted);">{{ entry.line }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ═══ SMS GATEWAY ═══ -->
+<div class="card-header" style="margin-bottom: 0.75rem;">&#128172; SMS Gateway</div>
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong>Status:</strong>
+            {% if sms.configured %}
+            <span class="badge badge-ok">&#10003; Configured</span>
+            {% else %}
+            <span class="badge badge-warn">&#9888; Not configured</span>
+            {% endif %}
+        </div>
+        {% if sms.recent_sms_count > 0 %}
+        <span style="font-size: 0.85rem;"><strong>{{ sms.recent_sms_count }}</strong> recent SMS</span>
+        {% endif %}
+    </div>
+
+    {% if sms.configured %}
+    <div style="margin-top: 0.75rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem;">
+        <div><span style="color: var(--muted);">Server:</span> {{ sms.server_name }}</div>
+        <div><span style="color: var(--muted);">Host:</span> {{ sms.smtp_host }}</div>
+        <div>
+            <span style="color: var(--muted);">Active:</span>
+            {% if sms.smtp_active %}
+            <span style="color: var(--green);">Yes</span>
+            {% else %}
+            <span style="color: var(--red);">No</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if sms.sms_modules %}
+    <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted);">
+        Installed SMS modules:
+        {% for mod in sms.sms_modules %}
+        <span class="badge badge-info">{{ mod.name }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if sms.recent_sms_log %}
+    <table style="margin-top: 0.75rem;">
+        <tr><th>Subject</th><th>State</th><th>Date</th></tr>
+        {% for sms in sms.recent_sms_log %}
+        <tr>
+            <td>{{ sms.subject }}</td>
+            <td>
+                {% if sms.state == 'sent' %}
+                <span class="badge badge-ok">sent</span>
+                {% elif sms.state == 'exception' %}
+                <span class="badge badge-fail">failed</span>
+                {% else %}
+                <span class="badge badge-info">{{ sms.state }}</span>
+                {% endif %}
+            </td>
+            <td style="font-size: 0.8rem; color: var(--muted);">{{ sms.date }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if sms.error %}
+    <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--orange);">{{ sms.error }}</div>
+    {% endif %}
+</div>
+
+<!-- ═══ ODOO ISSUES ═══ -->
+<div class="card-header" style="margin-bottom: 0.75rem;">&#128030; Odoo Issues (last 2 hours)</div>
+<div class="grid-3" style="margin-bottom: 1.5rem;">
+    {% for env in ('dev', 'stage', 'prod') %}
+    {% set err = odoo_errors.get(env) %}
+    <div class="card env-card {{ env }}">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>{{ env.upper() }}</strong>
+            {% if err and err.error_count > 0 %}
+            <span class="badge badge-fail">{{ err.error_count }} errors</span>
+            {% else %}
+            <span class="badge badge-ok">Clean</span>
+            {% endif %}
+        </div>
+
+        {% if err and err.error_count > 0 %}
+        <div style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--muted);">
+            Last: {{ err.last_error_time or 'unknown' }}
+        </div>
+        <div style="margin-top: 0.5rem; max-height: 180px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.72rem;">
+            {% for error_line in err.recent_errors %}
+            <div style="padding: 0.2rem 0; border-bottom: 1px solid var(--border); color: var(--red); word-break: break-all;">
+                {{ error_line }}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="margin-top: 0.5rem; color: var(--green); font-size: 0.85rem;">&#10003; No errors</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<!-- ═══ ENV REACHABILITY ═══ -->
+<div class="card-header" style="margin-bottom: 0.75rem;">&#127758; Environment Reachability</div>
+<div class="grid-3" style="margin-bottom: 1.5rem;">
+    {% for env in ('dev', 'stage', 'prod') %}
+    {% set h = env_health.get(env, {}) %}
+    <div class="card env-card {{ env }}" style="text-align: center;">
+        <strong>{{ env.upper() }}</strong>
+        <div style="margin-top: 0.5rem;">
+            {% if h.reachable %}
+            <span class="badge badge-ok">&#10003; Reachable</span>
+            <div style="font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem;">
+                HTTP {{ h.http_status }} · {{ h.response_ms }}ms
+            </div>
+            {% else %}
+            <span class="badge badge-fail">&#10007; Down</span>
+            {% if h.error %}
+            <div style="font-size: 0.75rem; color: var(--red); margin-top: 0.25rem;">{{ h.error }}</div>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Auto-refresh script -->
+<script>
+(function() {
+    var countdown = 30;
+    var el = document.getElementById('refresh-counter');
+    var timer = setInterval(function() {
+        countdown--;
+        if (el) el.textContent = 'Auto-refresh in ' + countdown + 's';
+        if (countdown <= 0) {
+            location.reload();
+        }
+    }, 1000);
+
+    // Reset countdown on manual refresh click
+    document.getElementById('refresh-btn').addEventListener('click', function() {
+        clearInterval(timer);
+    });
+})();
+</script>
+{% endblock %}

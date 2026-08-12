@@ -18,6 +18,7 @@ from . import checks as check_engine
 from . import promote as promote_engine
 from . import rollback as rollback_engine
 from . import gitops
+from . import monitor
 
 
 # --- App Factory ---
@@ -243,6 +244,29 @@ def create_app() -> FastAPI:
         ctx = base_context(request)
         ctx["active_page"] = "guide"
         return render_template("guide.html", ctx)
+
+    @app.get("/monitor", response_class=HTMLResponse)
+    async def monitor_page(request: Request, db: Session = Depends(get_db)):
+        ctx = base_context(request)
+        ctx["active_page"] = "monitor"
+
+        try:
+            snap = monitor.collect_full_snapshot(db)
+            ctx["system"] = snap.system
+            ctx["email"] = snap.email
+            ctx["sms"] = snap.sms
+            ctx["odoo_errors"] = snap.odoo_errors
+            ctx["env_health"] = snap.env_health
+            ctx["snapshot_time"] = snap.timestamp
+        except Exception as e:
+            ctx["error"] = str(e)[:300]
+            ctx["system"] = {}
+            ctx["email"] = {}
+            ctx["sms"] = {}
+            ctx["odoo_errors"] = {}
+            ctx["env_health"] = {}
+
+        return render_template("monitor.html", ctx)
 
     @app.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request, db: Session = Depends(get_db)):
