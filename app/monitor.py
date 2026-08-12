@@ -509,8 +509,24 @@ def check_system_health() -> SystemHealth:
 
 # ── Full Snapshot ─────────────────────────────────────────────────────
 
-def collect_full_snapshot(db_session=None) -> MonitorSnapshot:
-    """Collect all monitoring data into a single snapshot."""
+# In-memory snapshot cache — auto-refresh and concurrent requests hit this
+# instead of re-running ~3-4s of subprocess/XML-RPC/Docker work every 30s.
+_snapshot_cache = {"snap": None, "ts": 0.0}
+SNAPSHOT_CACHE_TTL = 25.0  # seconds
+
+
+def collect_full_snapshot(db_session=None, use_cache: bool = True) -> MonitorSnapshot:
+    """Collect all monitoring data into a single snapshot.
+
+    Uses an in-memory cache (default 25s TTL) so rapid/auto-refresh requests
+    don't each trigger the full 3-4s of blocking checks. Pass use_cache=False
+    to force a fresh collection.
+    """
+    if use_cache:
+        cached, ts = _snapshot_cache["snap"], _snapshot_cache["ts"]
+        if cached is not None and (time.time() - ts) < SNAPSHOT_CACHE_TTL:
+            return cached
+
     import socket
     from . import odoo_client as oc
 
@@ -591,5 +607,10 @@ def collect_full_snapshot(db_session=None) -> MonitorSnapshot:
                 }
         except Exception:
             pass
+
+    # Store in cache for subsequent requests within TTL
+    if use_cache:
+        _snapshot_cache["snap"] = snap
+        _snapshot_cache["ts"] = time.time()
 
     return snap

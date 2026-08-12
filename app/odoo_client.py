@@ -8,8 +8,14 @@ import urllib.request
 import ssl
 import json
 import subprocess
+import socket
 from dataclasses import dataclass, field
 from typing import Optional
+
+# Global socket timeout — prevents XML-RPC calls from hanging the worker
+# (xmlrpc.client.ServerProxy has NO default timeout; a slow/hung Odoo endpoint
+#  blocks the request forever and, with few workers, the whole dashboard).
+socket.setdefaulttimeout(10)
 
 
 # --- Environment config ---
